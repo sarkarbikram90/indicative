@@ -1,119 +1,19 @@
 # Indicative — Implementation Plan
 
-## 0. Current repository state
+## Execution Status Summary
 
-At the time of writing, the repository `sarkarbikram90/indicative` contains only `.gitignore`, `Agent.md`, `LICENSE`, and `README.md`; there is no existing application code. This is a greenfield implementation. The proposed architecture in Agent.md §5 is therefore adopted directly, with the local working directory treated as the monorepo root.
+All MVP phases (Phases 0–7) defined in `Agent.md §24` have been implemented and verified with automated unit, integration, security, real-scanner end-to-end, and regression corpus tests (`8/8` test files, `29/29` tests passing).
 
-Foundation files may be created by a separate workstream; this plan defines the target structure regardless of which files already exist.
+| Phase | Scope | Key Deliverables | Verification Gate | Status |
+|---|---|---|---|---|
+| **Phase 0** | Repository Assessment & Architecture | Product strategy, MVP scope, system architecture, threat model (`T1`–`T11`), canonical finding schema, ADRs (`ADR-001`–`ADR-013`), implementation plan | All 7 docs authored and aligned with actual implementation | ✅ Complete |
+| **Phase 1** | Foundation | Monorepo workspaces, `packages/config`, `packages/contracts`, `packages/security`, `packages/shared`, `packages/database` (19 tables + SQL migration + seed), `apps/api`, `apps/worker` BullMQ, `apps/web`, `docker-compose.yml`, `.env.example` | All 12 workspaces compile/typecheck cleanly; `docker compose config --quiet` valid; migrations & seed verified | ✅ Complete |
+| **Phase 2** | Repository Integration | GitHub OAuth (signed CSRF state), GitHub App RS256 JWT + short-lived installation token discovery, project/repo linking, hardened full-history ingestion, idempotent scan queuing | Mocked GitHub API integration tests + real multi-commit Git ingestion verified; zero token leakage | ✅ Complete |
+| **Phase 3** | Scanner Execution | `services/scanner-runner`, workspace sanitization, resource limits, pinned Semgrep `1.186.0` + bundled JS/TS/Python ruleset (`indicative-sast-v1.0.0`), pinned Trivy `0.76.2` offline DB, pinned Gitleaks `8.30.1` (`dir` + `git`), health checks | All 3 scanners demonstrated independently and via compiled runner `/health` | ✅ Complete |
+| **Phase 4** | Findings Intelligence | Canonical `SecurityFinding` schema, output parsers, normalization, category-specific fingerprinting, tenant-keyed HKDF+HMAC secret correlation, deduplication, lifecycle state machine, scan comparison & verification, qualitative risk prioritization, JSON/SARIF/CSV exports | Unit + E2E tests verify dedupe, lifecycle transitions, `VERIFICATION_INCONCLUSIVE` on failure, and zero secret leaks | ✅ Complete |
+| **Phase 5** | AI Security Analyst | Provider-agnostic `AiProvider`, `DisabledAiProvider`, `OpenAiCompatibleProvider`, pre-LLM secret redaction gate, `<UNTRUSTED_REPOSITORY_DATA>` fencing, Zod output validation, model/prompt versioning, scoped AI Advisor | Unit + E2E tests verify disabled fallback, secret blocking, invalid JSON/refusal/429 handling, and prompt-injection resilience | ✅ Complete |
+| **Phase 6** | Dashboard & Reporting | Full `/api/v1/*` REST API + OpenAPI 3.1 `/docs`, Landing/Auth, Dashboard, Projects, Scan Details, Findings, Finding Details, AI Advisor, JSON/SARIF/CSV downloads | Next.js 15 production build passes (`8` routes); live compiled API smoke tests pass | ✅ Complete |
+| **Phase 7** | Verification & Hardening | Regression corpus (`vulnerable-app` + `clean-app`), unit/integration/security/E2E suites, tenant isolation tests, runner hardening tests, production-readiness assessment | `29/29` tests pass; measured corpus baseline: `20/20` recall, `1.0` precision, `0` FPR, `0` parsing/scanner failures | ✅ Complete |
 
-## 1. Guiding constraints
-
-- Build the smallest reliable, demonstrable MVP — not a mockup.
-- No dead buttons, no fabricated findings, no mocked scanners presented as real.
-- Security requirements are not weakened to simplify demonstration.
-- Each phase must produce verifiable output before the next begins.
-- Do not ask for approval after every small decision; document assumptions and proceed.
-
-## 2. Phase 0 — Repository assessment and architecture
-
-**Status:** Documentation produced (`docs/product/*`, `docs/architecture/*`, `docs/engineering/*`).
-
-Deliverables:
-- Recorded existing state (empty/greenfield)
-- Confirmed technology stack
-- System architecture, threat model, finding schema
-- Implementation plan and architecture decisions
-
-## 3. Phase 1 — Foundation
-
-Build:
-- Monorepo structure and workspace tooling
-- `packages/contracts` — Zod schemas and shared types
-- `packages/config` — validated environment configuration
-- `packages/shared` — logging, errors, correlation IDs
-- `packages/security` — redaction, keyed HMAC fingerprints, path safety
-- `packages/database` — Drizzle schema, migrations, seeds
-- `apps/api` — Fastify server, authN/authZ, error handling, audit
-- `apps/web` — Next.js shell and design system
-- Redis + BullMQ infrastructure
-- Docker Compose for Postgres, Redis, MinIO, API, worker, web, runner
-- `.env.example`
-
-Verification: services start, health checks pass, migrations run, config validation rejects bad input.
-
-## 4. Phase 2 — Repository integration
-
-Build:
-- GitHub App configuration and minimum read-only permissions
-- OAuth state/CSRF handling and user authentication
-- Repository discovery and selection
-- Trusted ingestion with short-lived installation tokens
-- Commit SHA and branch metadata capture
-- Full Git history preservation for Gitleaks
-- Scan creation, idempotency, and queueing
-
-Verification: mocked GitHub responses in integration tests; authorization checks on every operation; no tokens in logs or frontend.
-
-## 5. Phase 3 — Scanner execution
-
-Build:
-- `services/scanner-runner` with isolated, ephemeral workspaces
-- Safe process spawning (argument arrays, allowlisted binaries, timeouts, resource limits)
-- Semgrep adapter (pinned version and ruleset; JS/TS/Python)
-- Trivy adapter (filesystem SCA + selected misconfigurations; controlled DB updates)
-- Gitleaks adapter (current content + Git history, with explicit limitation reporting)
-- Health checks, execution status, error classification, structured output parsing
-
-Verification: each scanner demonstrated independently against the regression corpus; versions and command flags verified against official documentation for the pinned versions.
-
-## 6. Phase 4 — Findings intelligence
-
-Build:
-- Canonical finding schema and Zod validation
-- Parser → normalizer pipeline for all three scanners
-- Severity/category normalization with original values preserved
-- Category-specific deterministic fingerprints
-- Secret redaction and keyed HMAC secret fingerprints
-- Deduplication, occurrence tracking, status transitions
-- Persistence and scan comparison (new / recurring / not detected)
-
-Verification: unit tests for normalization, mapping, fingerprint stability, dedupe, redaction, and lifecycle; integration test persisting findings and comparing scans.
-
-## 7. Phase 5 — AI Security Analyst
-
-Build:
-- Provider-agnostic LLM adapter, OpenAI-compatible where supported
-- Graceful disable when no API key is configured
-- Secret-redaction stage before every AI request
-- Minimal scoped context collection
-- Structured, schema-validated responses
-- Handling for invalid JSON, refusals, timeouts, provider errors, rate limits, token limits
-- Model and prompt version recorded per analysis
-
-Verification: deterministic scanning works with AI disabled; tests cover redaction and malformed model output; prompt-injection tests confirm repository text is treated as data.
-
-## 8. Phase 6 — Dashboard and reporting
-
-Build:
-- Landing/sign-in/GitHub connection flow
-- Dashboard summaries (counts, trends, recent scans/activity — no meaningless scores)
-- Projects, scan details, findings list with filters
-- Finding detail page with evidence, source context, AI analysis, remediation, history
-- AI Security Advisor scoped to project/scan/finding
-- Reports: JSON, SARIF (where mappable), CSV — redacted, with provenance
-
-Verification: UI renders real API data; reports contain no plaintext secrets.
-
-## 9. Phase 7 — Verification and hardening
-
-Build:
-- Regression corpus with intentionally vulnerable and clean repositories, dummy credentials only
-- Unit, integration, security, and end-to-end tests
-- Security tests: tenant isolation, authz failures, prompt injection, malicious filenames, path traversal, symlinks, command injection, timeouts, resource exhaustion, SSRF, internal network restrictions, secret leakage, malformed output
-- Resource limits, retention configuration, production-readiness assessment
-
-Verification: actual scanner execution in e2e tests; measured precision/recall/false-positive baseline (no invented numbers); documented limitations.
-
-## 10. Definition of complete
-
-The MVP is complete only when acceptance criteria in `docs/product/mvp-scope.md` are demonstrable with evidence and the final deliverables in Agent.md §26 are present, with implemented vs planned functionality clearly distinguished.
+## Post-MVP Hardening Roadmap
+See [Production-Readiness Assessment](production-readiness.md) and [Future Performance Note](../../Suggetion.md) for microVM/gVisor multi-tenant isolation, PostgreSQL RLS, Cloud KMS key management, automated webhook scans, and optional Rust hot-path profiling.

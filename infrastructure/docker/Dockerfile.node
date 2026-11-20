@@ -1,0 +1,40 @@
+# Indicative API / Worker Node.js LTS Image
+FROM node:22-bookworm-slim AS base
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git ca-certificates curl \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY package.json tsconfig.base.json ./
+COPY packages ./packages
+COPY services ./services
+COPY apps/api/package.json ./apps/api/package.json
+COPY apps/worker/package.json ./apps/worker/package.json
+COPY apps/web/package.json ./apps/web/package.json
+
+RUN npm install --workspaces --include-workspace-root
+
+COPY apps/api ./apps/api
+COPY apps/worker ./apps/worker
+COPY tests/fixtures ./tests/fixtures
+
+RUN npm --workspace @indicative/config run build \
+  && npm --workspace @indicative/contracts run build \
+  && npm --workspace @indicative/security run build \
+  && npm --workspace @indicative/shared run build \
+  && npm --workspace @indicative/database run build \
+  && npm --workspace @indicative/scanners run build \
+  && npm --workspace @indicative/findings run build \
+  && npm --workspace @indicative/ai run build \
+  && npm --workspace @indicative/scanner-runner run build \
+  && npm --workspace @indicative/worker run build \
+  && npm --workspace @indicative/api run build
+
+RUN groupadd -g 10001 indicative && useradd -u 10001 -g indicative -m indicative \
+  && mkdir -p /tmp/indicative-workspaces /app/.local-artifacts \
+  && chown -R 10001:10001 /tmp/indicative-workspaces /app/.local-artifacts
+
+USER 10001:10001
+EXPOSE 4000
+CMD ["node", "apps/api/dist/main.js"]

@@ -1,0 +1,226 @@
+# Indicative Pinned SAST Ruleset (indicative-sast-v1.0.0)
+# Deterministic offline Semgrep CE rules for JavaScript, TypeScript, and Python.
+# License: Apache-2.0 (bundled with Indicative; executed via Semgrep CE LGPL-2.1)
+rules:
+  # --- SQL Injection ---
+  - id: indicative.js.sql-injection.template-query
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Potential SQL injection via string interpolation or concatenation inside a database query.
+      Use parameterized queries or prepared statements instead.
+    metadata:
+      category: security
+      cwe: "CWE-89: Improper Neutralization of Special Elements used in an SQL Command"
+      owasp: "A03:2021 - Injection"
+      confidence: HIGH
+      impact: HIGH
+      remediation: "Use parameterized placeholders (e.g., $1, ?) and pass user input as bind parameters."
+    pattern-either:
+      - pattern: $DB.query(`...${$INPUT}...`, ...)
+      - pattern: $DB.query("..." + $INPUT + "...", ...)
+      - pattern: $DB.query("..." + $INPUT, ...)
+      - pattern: $DB.execute(`...${$INPUT}...`, ...)
+      - pattern: $DB.execute("..." + $INPUT, ...)
+
+  - id: indicative.python.sql-injection.cursor-execute
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Potential SQL injection: formatted or concatenated string passed directly to cursor.execute().
+      Use parameterized SQL queries instead.
+    metadata:
+      category: security
+      cwe: "CWE-89: Improper Neutralization of Special Elements used in an SQL Command"
+      owasp: "A03:2021 - Injection"
+      confidence: HIGH
+      impact: HIGH
+      remediation: "Pass query arguments as a parameter tuple: cursor.execute('SELECT ... WHERE id = %s', (user_id,))."
+    pattern-either:
+      - pattern: $CURSOR.execute(f"...{$X}...")
+      - pattern: $CURSOR.execute("..." + $X)
+      - pattern: $CURSOR.execute("..." % $X)
+      - pattern: $CURSOR.execute("...".format(...))
+
+  # --- Command Injection ---
+  - id: indicative.js.command-injection.child-process-exec
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Potential OS command injection via child_process.exec/execSync with dynamic input.
+      Use execFile/spawn with an explicit argument array and shell: false.
+    metadata:
+      category: security
+      cwe: "CWE-78: OS Command Injection"
+      owasp: "A03:2021 - Injection"
+      confidence: HIGH
+      impact: HIGH
+      remediation: "Replace exec/execSync with execFile/spawnFile using fixed binary paths and argument arrays."
+    pattern-either:
+      - pattern: exec(`...${$INPUT}...`, ...)
+      - pattern: exec("..." + $INPUT, ...)
+      - pattern: execSync(`...${$INPUT}...`, ...)
+      - pattern: execSync("..." + $INPUT, ...)
+      - pattern: child_process.exec(`...${$INPUT}...`, ...)
+      - pattern: child_process.exec("..." + $INPUT, ...)
+
+  - id: indicative.python.command-injection.shell-true
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Potential OS command injection via os.system or subprocess with shell=True.
+      Pass a list of arguments to subprocess.run(..., shell=False).
+    metadata:
+      category: security
+      cwe: "CWE-78: OS Command Injection"
+      owasp: "A03:2021 - Injection"
+      confidence: HIGH
+      impact: HIGH
+      remediation: "Avoid os.system and shell=True; pass an argument list to subprocess.run(['cmd', arg], shell=False)."
+    pattern-either:
+      - pattern: os.system($CMD)
+      - pattern: subprocess.run($CMD, ..., shell=True, ...)
+      - pattern: subprocess.Popen($CMD, ..., shell=True, ...)
+      - pattern: subprocess.call($CMD, ..., shell=True, ...)
+
+  # --- Hardcoded Credentials / Secrets in Code ---
+  - id: indicative.js.hardcoded-jwt-secret
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Hardcoded secret literal passed to jwt.sign() or jwt.verify(). Load signing secrets from a
+      managed secret store or environment variable.
+    metadata:
+      category: security
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+      confidence: HIGH
+      impact: HIGH
+      remediation: "Load JWT signing keys from environment variables or a KMS and rotate exposed keys."
+    pattern-either:
+      - pattern: jwt.sign($PAYLOAD, "...", ...)
+      - pattern: jwt.verify($TOKEN, "...", ...)
+
+  # --- Insecure Cryptography ---
+  - id: indicative.js.insecure-crypto.weak-hash
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      Weak cryptographic hash algorithm (MD5 or SHA-1) detected. Avoid MD5/SHA-1 for password hashing,
+      signatures, or integrity-critical checks.
+    metadata:
+      category: security
+      cwe: "CWE-327: Use of a Broken or Risky Cryptographic Algorithm"
+      owasp: "A02:2021 - Cryptographic Failures"
+      confidence: HIGH
+      impact: MEDIUM
+      remediation: "Use SHA-256/SHA-512 for integrity hashes and Argon2id/scrypt/bcrypt for passwords."
+    pattern-either:
+      - pattern: crypto.createHash("md5")
+      - pattern: crypto.createHash("sha1")
+      - pattern: createHash("md5")
+      - pattern: createHash("sha1")
+
+  - id: indicative.python.insecure-crypto.weak-hash
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Weak cryptographic hash algorithm (MD5 or SHA-1) used via hashlib.
+      Use SHA-256+ for digests or Argon2/scrypt/bcrypt for passwords.
+    metadata:
+      category: security
+      cwe: "CWE-327: Use of a Broken or Risky Cryptographic Algorithm"
+      owasp: "A02:2021 - Cryptographic Failures"
+      confidence: HIGH
+      impact: MEDIUM
+      remediation: "Replace hashlib.md5/sha1 with hashlib.sha256 or a dedicated password KDF."
+    pattern-either:
+      - pattern: hashlib.md5(...)
+      - pattern: hashlib.sha1(...)
+
+  # --- Unsafe Deserialization / Code Execution ---
+  - id: indicative.python.unsafe-deserialization.pickle-yaml
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Unsafe deserialization detected (pickle.loads or yaml.load without SafeLoader).
+      Untrusted input can achieve arbitrary code execution.
+    metadata:
+      category: security
+      cwe: "CWE-502: Deserialization of Untrusted Data"
+      owasp: "A08:2021 - Software and Data Integrity Failures"
+      confidence: HIGH
+      impact: HIGH
+      remediation: "Use JSON or yaml.safe_load() instead of pickle or unsafe yaml.load()."
+    pattern-either:
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+      - pattern: yaml.load($DATA, Loader=yaml.Loader)
+      - pattern: yaml.load($DATA, Loader=yaml.UnsafeLoader)
+      - pattern: yaml.unsafe_load(...)
+
+  - id: indicative.js.unsafe-eval
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Dynamic code execution via eval() or new Function() detected. If reachable by untrusted input,
+      this enables arbitrary code execution.
+    metadata:
+      category: security
+      cwe: "CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code"
+      owasp: "A03:2021 - Injection"
+      confidence: MEDIUM
+      impact: HIGH
+      remediation: "Eliminate eval/new Function and use safe JSON parsing or declarative logic."
+    pattern-either:
+      - pattern: eval($X)
+      - pattern: new Function(...)
+
+  # --- Insecure Authentication & TLS ---
+  - id: indicative.js.insecure-auth.tls-disabled
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      TLS certificate verification is explicitly disabled (rejectUnauthorized: false),
+      exposing connections to Man-in-the-Middle attacks.
+    metadata:
+      category: security
+      cwe: "CWE-295: Improper Certificate Validation"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+      confidence: HIGH
+      impact: HIGH
+      remediation: "Remove rejectUnauthorized: false and configure trusted CA certificates."
+    pattern: "{ ..., rejectUnauthorized: false, ... }"
+
+  - id: indicative.js.insecure-auth.jwt-decode-unverified
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      jwt.decode() parses JWT payloads without verifying the cryptographic signature.
+      Use jwt.verify() for authentication and authorization decisions.
+    metadata:
+      category: security
+      cwe: "CWE-347: Improper Verification of Cryptographic Signature"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+      confidence: MEDIUM
+      impact: HIGH
+      remediation: "Use jwt.verify(token, secretOrPublicKey, { algorithms: [...] }) instead of jwt.decode()."
+    pattern: jwt.decode(...)
+
+  - id: indicative.python.insecure-auth.tls-disabled
+    languages: [python]
+    severity: ERROR
+    message: >-
+      TLS certificate verification disabled in HTTP request (verify=False),
+      exposing traffic to Man-in-the-Middle interception.
+    metadata:
+      category: security
+      cwe: "CWE-295: Improper Certificate Validation"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+      confidence: HIGH
+      impact: HIGH
+      remediation: "Remove verify=False and supply a valid CA bundle if using internal certificates."
+    pattern-either:
+      - pattern: requests.get(..., verify=False, ...)
+      - pattern: requests.post(..., verify=False, ...)
+      - pattern: requests.request(..., verify=False, ...)

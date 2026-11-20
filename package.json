@@ -1,0 +1,39 @@
+{
+  "name": "indicative",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Indicative — AI-Powered Repository Security Intelligence Platform (MVP)",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20.18.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "services/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "dev:api": "npm --workspace @indicative/api run dev",
+    "dev:worker": "npm --workspace @indicative/worker run dev",
+    "dev:runner": "npm --workspace @indicative/scanner-runner run dev",
+    "dev:web": "npm --workspace @indicative/web run dev",
+    "db:migrate": "npm --workspace @indicative/database run migrate",
+    "db:seed": "npm --workspace @indicative/database run seed",
+    "test": "vitest run",
+    "test:unit": "vitest run packages/ services/",
+    "test:integration": "vitest run tests/integration",
+    "test:security": "vitest run tests/security",
+    "test:e2e": "vitest run tests/e2e",
+    "test:regression": "vitest run tests/regression"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,188 @@
+{
+  "manifestVersion": "1.0.0",
+  "pinnedScanners": {
+    "semgrep": { "version": "1.186.0", "rulesetVersion": "indicative-sast-v1.0.0" },
+    "trivy": { "version": "0.76.2", "rulesetVersion": "trivy-offline-db-v2" },
+    "gitleaks": { "version": "8.30.1", "rulesetVersion": "gitleaks-v8-default" }
+  },
+  "fixtures": {
+    "vulnerable-app": {
+      "expectedFindings": [
+        {
+          "id": "sast-js-sqli",
+          "scanner": "semgrep",
+          "category": "SAST",
+          "ruleId": "indicative.js.sql-injection.template-query",
+          "filePath": "src/vulnerable.ts",
+          "lineStart": 8,
+          "mustRedactSecret": false
+        },
+        {
+          "id": "sast-js-cmdi",
+          "scanner": "semgrep",
+          "category": "SAST",
+          "ruleId": "indicative.js.command-injection.child-process-exec",
+          "filePath": "src/vulnerable.ts",
+          "lineStart": 13,
+          "mustRedactSecret": false
+        },
+        {
+          "id": "sast-js-weak-hash",
+          "scanner": "semgrep",
+          "category": "SAST",
+          "ruleId": "indicative.js.insecure-crypto.weak-hash",
+          "filePath": "src/vulnerable.ts",
+          "lineStart": 18,
+          "mustRedactSecret": false
+        },
+        {
+          "id": "sast-js-eval",
+          "scanner": "semgrep",
+          "category": "SAST",
+          "ruleId": "indicative.js.unsafe-eval",
+          "filePath": "src/vulnerable.ts",
+          "lineStart": 23,
+          "mustRedactSecret": false
+        },
+        {
+          "id": "sast-js-tls",
+          "scanner": "semgrep",
+          "category": "SAST",
+          "ruleId": "indicative.js.insecure-auth.tls-disabled",
+          "filePath": "src/vulnerable.ts",
+          "lineStart": 26,
+          "mustRedactSecret": false
+        },
+        {
+          "id": "sast-js-hardcoded-jwt",
+          "scanner": "semgrep",
+          "category": "SAST",
+          "ruleId": "indicative.js.hardcoded-jwt-secret",
+          "filePath": "src/vulnerable.ts",
+          "lineStart": 33,
+          "mustRedactSecret": false
+        },
+        {
+          "id": "sast-py-sqli",
+          "scanner": "semgrep",
+          "category": "SAST",
+          "ruleId": "indicative.python.sql-injection.cursor-execute",
+          "filePath": "src/vulnerable.py",
+          "lineStart": 11,
+          "mustRedactSecret": false
+        },
+        {
+          "id": "sast-py-cmdi",
+          "scanner": "semgrep",
+          "category": "SAST",
+          "ruleId": "indicative.python.command-injection.shell-true",
+          "filePath": "src/vulnerable.py",
+          "lineStart": 15,
+          "mustRedactSecret": false
+        },
+        {
+          "id": "sast-py-weak-hash",
+          "scanner": "semgrep",
+          "category": "SAST",
+          "ruleId": "indicative.python.insecure-crypto.weak-hash",
+          "filePath": "src/vulnerable.py",
+          "lineStart": 19,
+          "mustRedactSecret": false
+        },
+        {
+          "id": "sast-py-pickle",
+          "scanner": "semgrep",
+          "category": "SAST",
+          "ruleId": "indicative.python.unsafe-deserialization.pickle-yaml",
+          "filePath": "src/vulnerable.py",
+          "lineStart": 23,
+          "mustRedactSecret": false
+        },
+        {
+          "id": "sast-py-yaml",
+          "scanner": "semgrep",
+          "category": "SAST",
+          "ruleId": "indicative.python.unsafe-deserialization.pickle-yaml",
+          "filePath": "src/vulnerable.py",
+          "lineStart": 27,
+          "mustRedactSecret": false
+        },
+        {
+          "id": "sast-py-tls",
+          "scanner": "semgrep",
+          "category": "SAST",
+          "ruleId": "indicative.python.insecure-auth.tls-disabled",
+          "filePath": "src/vulnerable.py",
+          "lineStart": 31,
+          "mustRedactSecret": false
+        },
+        {
+          "id": "sca-lodash-vuln",
+          "scanner": "trivy",
+          "category": "SCA",
+          "packageName": "lodash",
+          "filePath": "package-lock.json",
+          "mustRedactSecret": false
+        },
+        {
+          "id": "sca-minimist-vuln",
+          "scanner": "trivy",
+          "category": "SCA",
+          "packageName": "minimist",
+          "filePath": "package-lock.json",
+          "mustRedactSecret": false
+        },
+        {
+          "id": "iac-dockerfile",
+          "scanner": "trivy",
+          "category": "IAC",
+          "filePath": "Dockerfile",
+          "mustRedactSecret": false
+        },
+        {
+          "id": "iac-k8s-deployment",
+          "scanner": "trivy",
+          "category": "IAC",
+          "filePath": "k8s/deployment.yaml",
+          "mustRedactSecret": false
+        },
+        {
+          "id": "iac-terraform",
+          "scanner": "trivy",
+          "category": "IAC",
+          "filePath": "infra/main.tf",
+          "mustRedactSecret": false
+        },
+        {
+          "id": "secret-aws-working-tree",
+          "scanner": "gitleaks",
+          "category": "SECRET",
+          "ruleId": "aws-access-token",
+          "filePath": "config/current.env",
+          "mustRedactSecret": true
+        },
+        {
+          "id": "secret-github-removed-in-history",
+          "scanner": "gitleaks",
+          "category": "SECRET",
+          "ruleId": "github-pat",
+          "filePath": "config/legacy-removed.env",
+          "exposureLocation": "GIT_HISTORY",
+          "mustRedactSecret": true
+        },
+        {
+          "id": "secret-private-key",
+          "scanner": "gitleaks",
+          "category": "SECRET",
+          "ruleId": "private-key",
+          "filePath": "keys/service-key.pem",
+          "mustRedactSecret": true
+        }
+      ]
+    },
+    "clean-app": {
+      "expectedFindings": [],
+      "maxFalsePositivesAllowed": 0
+    }
+  }
+}

@@ -1,0 +1,206 @@
+# Indicative Local Development Stack
+# Note: Docker containers provide local development isolation only.
+# Multi-tenant production deployments require microVM/gVisor isolation (Firecracker/Kata/runsc).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: indicative
+      POSTGRES_PASSWORD: indicative_dev_password
+      POSTGRES_DB: indicative
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U indicative -d indicative"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - control_plane
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - control_plane
+
+  minio:
+    image: minio/minio:RELEASE.2025-02-18T16-25-55Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: indicative_minio
+      MINIO_ROOT_PASSWORD: indicative_minio_secret_dev
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - control_plane
+
+  # Dedicated isolated scanner runner:
+  # - Non-root UID/GID 10001
+  # - Read-only root filesystem + bounded tmpfs
+  # - ALL Linux capabilities dropped + no-new-privileges
+  # - NO Docker socket, NO GitHub tokens, NO DB/Redis/cloud credentials
+  # - Attached ONLY to scanner_internal (internal: true -> ZERO internet egress)
+  scanner-runner:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.scanner-runner
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
+    environment:
+      NODE_ENV: development
+      SCANNER_RUNNER_HOST: "0.0.0.0"
+      SCANNER_RUNNER_PORT: "4100"
+      SCANNER_WORKSPACES_ROOT: /shared-workspaces
+      SCANNER_RUNNER_SHARED_SECRET: "${SCANNER_RUNNER_SHARED_SECRET:-dev-only-scanner-runner-internal-token-change-in-prod}"
+      SECRET_FINGERPRINT_KEY: "${SECRET_FINGERPRINT_KEY:-dev-only-replace-with-64-char-hmac-master-key-fedcba9876543210}"
+      TRIVY_CACHE_DIR: /var/cache/trivy
+      SEMGREP_RULES_DIR: /app/services/scanner-runner/rules/semgrep
+      SCANNER_TIMEOUT_MS: "${SCANNER_TIMEOUT_MS:-120000}"
+      MAX_SCAN_DURATION_MS: "${MAX_SCAN_DURATION_MS:-300000}"
+    volumes:
+      - ephemeral_workspaces:/shared-workspaces:ro
+    networks:
+      - scanner_internal
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.node
+    command: ["sh", "-c", "node packages/database/dist/migrate.js && node packages/database/dist/seed.js && node apps/api/dist/main.js"]
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: development
+      DEMO_MODE: "${DEMO_MODE:-true}"
+      API_HOST: "0.0.0.0"
+      API_PORT: "4000"
+      API_PUBLIC_URL: "${API_PUBLIC_URL:-http://localhost:4000}"
+      WEB_PUBLIC_URL: "${WEB_PUBLIC_URL:-http://localhost:3000}"
+      DATABASE_URL: postgresql://indicative:indicative_dev_password@postgres:5432/indicative
+      REDIS_URL: redis://redis:6379
+      ARTIFACT_STORAGE_DRIVER: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: indicative-artifacts
+      S3_ACCESS_KEY_ID: indicative_minio
+      S3_SECRET_ACCESS_KEY: indicative_minio_secret_dev
+      S3_FORCE_PATH_STYLE: "true"
+      SESSION_SECRET: "${SESSION_SECRET:-dev-only-replace-with-64-char-random-hex-string-0123456789abcdef}"
+      SECRET_FINGERPRINT_KEY: "${SECRET_FINGERPRINT_KEY:-dev-only-replace-with-64-char-hmac-master-key-fedcba9876543210}"
+      SCANNER_RUNNER_SHARED_SECRET: "${SCANNER_RUNNER_SHARED_SECRET:-dev-only-scanner-runner-internal-token-change-in-prod}"
+      GITHUB_OAUTH_CLIENT_ID: "${GITHUB_OAUTH_CLIENT_ID:-}"
+      GITHUB_OAUTH_CLIENT_SECRET: "${GITHUB_OAUTH_CLIENT_SECRET:-}"
+      GITHUB_APP_ID: "${GITHUB_APP_ID:-}"
+      GITHUB_APP_PRIVATE_KEY: "${GITHUB_APP_PRIVATE_KEY:-}"
+      AI_PROVIDER: "${AI_PROVIDER:-disabled}"
+      AI_API_BASE_URL: "${AI_API_BASE_URL:-https://api.openai.com/v1}"
+      AI_API_KEY: "${AI_API_KEY:-}"
+      AI_MODEL: "${AI_MODEL:-gpt-4o-mini}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - control_plane
+
+  worker:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.node
+    command: ["node", "apps/worker/dist/main.js"]
+    environment:
+      NODE_ENV: development
+      DEMO_MODE: "${DEMO_MODE:-true}"
+      DATABASE_URL: postgresql://indicative:indicative_dev_password@postgres:5432/indicative
+      REDIS_URL: redis://redis:6379
+      ARTIFACT_STORAGE_DRIVER: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: indicative-artifacts
+      S3_ACCESS_KEY_ID: indicative_minio
+      S3_SECRET_ACCESS_KEY: indicative_minio_secret_dev
+      S3_FORCE_PATH_STYLE: "true"
+      SCANNER_RUNNER_MODE: http
+      SCANNER_RUNNER_URL: http://scanner-runner:4100
+      SCANNER_WORKSPACES_ROOT: /shared-workspaces
+      SCANNER_RUNNER_SHARED_SECRET: "${SCANNER_RUNNER_SHARED_SECRET:-dev-only-scanner-runner-internal-token-change-in-prod}"
+      SECRET_FINGERPRINT_KEY: "${SECRET_FINGERPRINT_KEY:-dev-only-replace-with-64-char-hmac-master-key-fedcba9876543210}"
+      GITHUB_APP_ID: "${GITHUB_APP_ID:-}"
+      GITHUB_APP_PRIVATE_KEY: "${GITHUB_APP_PRIVATE_KEY:-}"
+      AI_PROVIDER: "${AI_PROVIDER:-disabled}"
+      AI_API_BASE_URL: "${AI_API_BASE_URL:-https://api.openai.com/v1}"
+      AI_API_KEY: "${AI_API_KEY:-}"
+      AI_MODEL: "${AI_MODEL:-gpt-4o-mini}"
+    volumes:
+      - ephemeral_workspaces:/shared-workspaces:rw
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      scanner-runner:
+        condition: service_started
+    networks:
+      - control_plane
+      - scanner_internal
+
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://localhost:4000}"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks:
+      - control_plane
+
+networks:
+  control_plane:
+    driver: bridge
+  scanner_internal:
+    driver: bridge
+    internal: true # Blocks ALL outbound internet access from scanner-runner
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  ephemeral_workspaces:

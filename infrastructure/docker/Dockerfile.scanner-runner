@@ -1,0 +1,72 @@
+# Indicative Isolated Scanner Runner Image
+# Pins exact scanner versions: Semgrep CE 1.186.0 (LGPL-2.1), Trivy 0.76.2 (Apache-2.0), Gitleaks 8.30.1 (MIT)
+# Pre-populates Trivy offline vulnerability DB & checks cache during build so runtime scanning requires ZERO internet access.
+FROM node:22-bookworm-slim AS scanner-runner
+
+ARG SEMGREP_VERSION=1.186.0
+ARG TRIVY_VERSION=0.76.2
+ARG GITLEAKS_VERSION=8.30.1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git python3 python3-pip python3-venv tar \
+  && rm -rf /var/lib/apt/lists/*
+
+# 1. Install pinned Semgrep CE into dedicated venv
+RUN python3 -m venv /opt/semgrep-venv \
+  && /opt/semgrep-venv/bin/pip install --no-cache-dir "semgrep==${SEMGREP_VERSION}" \
+  && ln -s /opt/semgrep-venv/bin/semgrep /usr/local/bin/semgrep
+
+# 2. Install pinned Trivy binary
+RUN curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+    -o /tmp/trivy.tar.gz \
+  && tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy \
+  && chmod +x /usr/local/bin/trivy \
+  && rm -f /tmp/trivy.tar.gz
+
+# 3. Install pinned Gitleaks binary
+RUN curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+    -o /tmp/gitleaks.tar.gz \
+  && tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks \
+  && chmod +x /usr/local/bin/gitleaks \
+  && rm -f /tmp/gitleaks.tar.gz
+
+# 4. Pre-populate offline Trivy vulnerability DB & checks bundle (controlled build-time update)
+RUN mkdir -p /var/cache/trivy \
+  && trivy fs --download-db-only --cache-dir /var/cache/trivy \
+  && trivy fs --download-checks-only --cache-dir /var/cache/trivy || true
+
+WORKDIR /app
+COPY package.json tsconfig.base.json ./
+COPY packages/config ./packages/config
+COPY packages/contracts ./packages/contracts
+COPY packages/security ./packages/security
+COPY packages/scanners ./packages/scanners
+COPY services/scanner-runner ./services/scanner-runner
+
+RUN npm install --workspace @indicative/config \
+    --workspace @indicative/contracts \
+    --workspace @indicative/security \
+    --workspace @indicative/scanners \
+    --workspace @indicative/scanner-runner \
+    --include-workspace-root \
+  && npm --workspace @indicative/config run build \
+  && npm --workspace @indicative/contracts run build \
+  && npm --workspace @indicative/security run build \
+  && npm --workspace @indicative/scanners run build \
+  && npm --workspace @indicative/scanner-runner run build
+
+# Hardened non-root user (UID/GID 10001)
+RUN groupadd -g 10001 scanner && useradd -u 10001 -g scanner -m scanner \
+  && mkdir -p /tmp/indicative-workspaces \
+  && chown -R 10001:10001 /var/cache/trivy /tmp/indicative-workspaces
+
+ENV SEMGREP_SEND_METRICS=off \
+    TRIVY_CACHE_DIR=/var/cache/trivy \
+    SEMGREP_RULES_DIR=/app/services/scanner-runner/rules/semgrep \
+    SCANNER_WORKSPACES_ROOT=/tmp/indicative-workspaces \
+    SCANNER_RUNNER_HOST=0.0.0.0 \
+    SCANNER_RUNNER_PORT=4100
+
+USER 10001:10001
+EXPOSE 4100
+CMD ["node", "services/scanner-runner/dist/server.js"]

@@ -1,166 +1,121 @@
 # Indicative — System Architecture
 
-## 1. Architectural style
+## 1. Architectural Style
 
-Indicative is a **modular monolith with separately deployed execution workers**. The application code lives in one repository with strict package boundaries; scans run asynchronously in isolated workers. Microservices are deliberately avoided for the MVP.
+Indicative is implemented as a **modular monolith with independently deployable execution workers** in a single TypeScript (`npm` workspaces) monorepo. Microservices are intentionally avoided for the MVP while preserving a strict trust boundary between trusted control-plane operations and untrusted repository scanning.
 
-The product philosophy drives the pipeline:
-
-```
-Detect → Understand → Prioritize → Recommend → Verify
-```
-
-## 2. Component map
+Core pipeline: `Detect → Understand → Prioritize → Recommend → Verify`
 
 ```text
-                         ┌──────────────────────┐
-                         │   Browser / Web app  │
-                         │   (Next.js, TS)      │
-                         └──────────┬───────────┘
-                                    │ HTTPS / REST
-                         ┌──────────▼───────────┐
-                         │   API service        │
-                         │   Fastify + Zod      │
-                         │   auth, authz, audit │
-                         └───┬──────────────┬───┘
-                             │              │
-              ┌──────────────▼──┐    ┌──────▼──────────────┐
-              │  PostgreSQL     │    │  Redis / BullMQ     │
-              │  Drizzle ORM    │    │  job queue          │
-              └──────────────▲──┘    └──────┬──────────────┘
-                             │              │
-                         ┌───┴──────────────▼───┐
-                         │   Worker service     │
-                         │   scan orchestration │
-                         └──────────┬───────────┘
-                                    │
-                 ┌──────────────────▼──────────────────┐
-                 │  Repository ingestion (trusted)     │
-                 │  GitHub installation token          │
-                 └──────────────────┬──────────────────┘
-                                    │ source + history
-                 ┌──────────────────▼──────────────────┐
-                 │  Scanner runner (isolated, untrusted)│
-                 │  Semgrep | Trivy | Gitleaks          │
-                 └──────────────────┬──────────────────┘
-                                    │ structured output
-                 ┌──────────────────▼──────────────────┐
-                 │  Findings pipeline                  │
-                 │  parse → normalize → redact →       │
-                 │  fingerprint → dedupe → persist     │
-                 └──────────────────┬──────────────────┘
-                                    │ sanitized context
-                 ┌──────────────────▼──────────────────┐
-                 │  AI Security Analyst (optional)     │
-                 └──────────────────────────────────────┘
++-----------------------------------------------------------------------------+
+|                                  CLIENTS                                    |
+|           Developer Browser (Next.js 15 App Router - apps/web :3000)        |
++--------------------------------------+--------------------------------------+
+                                       | HTTPS / HttpOnly Cookie + CSRF
+                                       v
++-----------------------------------------------------------------------------+
+|                        CONTROL PLANE API (apps/api :4000)                   |
+|  Fastify 5 + Zod + OpenAPI 3.1 + Rate Limit + Auth/Tenant Guard + Audit Log |
++------------------+-------------------+--------------------+-----------------+
+                   |                   |                    |
+                   v                   v                    v
+            +------------+      +-------------+      +--------------+
+            | PostgreSQL |      | Redis/BullMQ|      | MinIO (S3)   |
+            | Drizzle ORM|      | Scan Queue  |      | Redacted     |
+            +------------+      +------+------+      | Artifacts    |
+                                       |             +--------------+
+                                       v
++-----------------------------------------------------------------------------+
+|                      BACKGROUND WORKER (apps/worker)                        |
+|  1. Trusted GitHub Ingestion (short-lived installation token, size limits)  |
+|  2. Ephemeral Workspace Preparation & Path/Symlink Sanitization             |
+|  3. Dispatches Scan Job to Isolated Scanner Runner (no tokens passed)       |
+|  4. Normalization, Deduplication, HMAC Fingerprinting, Scan Comparison      |
+|  5. Persistence & Optional Sanitized AI Analysis (packages/ai)              |
++--------------------------------------+--------------------------------------+
+                                       | scanner_internal (internal: true, ZERO egress)
+                                       v
++-----------------------------------------------------------------------------+
+|               ISOLATED SCANNER RUNNER (services/scanner-runner :4100)       |
+|  Hardened non-root (10001) | Read-only rootfs | Cap-drop ALL | No Docker    |
+|  socket | No cloud/GitHub creds | Network isolated (no outbound internet)   |
+|                                                                             |
+|    +------------------+  +------------------+  +------------------------+   |
+|    | Semgrep 1.186.0  |  | Trivy 0.76.2     |  | Gitleaks 8.30.1        |   |
+|    | Pinned offline   |  | Offline DB cache |  | Working tree (`dir`) + |   |
+|    | JS/TS/Py ruleset |  | vuln,misconfig   |  | Git history (`git`)    |   |
+|    +------------------+  +------------------+  +------------------------+   |
++-----------------------------------------------------------------------------+
 ```
 
-## 3. Repository layout (planned structure)
+## 2. Implemented Monorepo Layout
 
 ```text
 indicative/
 ├── apps/
-│   ├── web/                 # Next.js dashboard
-│   ├── api/                 # Fastify REST API
-│   └── worker/              # BullMQ job processors
+│   ├── web/                 # Next.js 15 + React 19 + Tailwind CSS dashboard
+│   ├── api/                 # Fastify 5 REST API (/api/v1/*) + OpenAPI /docs
+│   └── worker/              # BullMQ processor + trusted GitHub App ingestion
 ├── services/
-│   └── scanner-runner/      # isolated scanner execution
+│   └── scanner-runner/      # Isolated scanner execution + pinned Semgrep ruleset
 ├── packages/
-│   ├── contracts/           # Zod schemas + shared types
-│   ├── config/              # validated environment config
-│   ├── security/            # redaction, HMAC fingerprints, path safety
-│   ├── database/            # Drizzle schema, migrations, seeds
-│   ├── scanners/            # adapter interface + Semgrep/Trivy/Gitleaks
-│   ├── findings/            # normalization, fingerprinting, lifecycle
-│   ├── ai/                  # provider abstraction, analysis pipeline
-│   └── shared/              # logging, errors, utilities
-├── infrastructure/          # docker, compose, scripts
-├── docs/
-├── tests/                   # fixtures, integration, security, e2e
+│   ├── config/              # Zod env validation + production security guardrails
+│   ├── contracts/           # Shared Zod schemas + TypeScript contracts
+│   ├── security/            # Secret redaction, HKDF+HMAC fingerprints, SSRF, workspace & prompt safety
+│   ├── shared/              # AppError, correlation IDs, Prometheus metrics, S3/MinIO & local storage
+│   ├── database/            # Drizzle ORM schema (19 tables), SQL migrations, seed script
+│   ├── scanners/            # ScannerAdapter contract + Semgrep, Trivy, Gitleaks adapters
+│   ├── findings/            # Normalization, fingerprinting, lifecycle, risk prioritization, JSON/SARIF/CSV
+│   └── ai/                  # Provider-agnostic OpenAI-compatible AI Analyst + redaction gate
+├── infrastructure/          # Dockerfiles (node, web, scanner-runner) & Trivy DB update script
+├── docs/                    # Product, architecture, threat model, schema, ADRs, readiness
+├── tests/                   # Fixtures/corpus, integration, security, E2E, regression benchmark
 ├── docker-compose.yml
 ├── .env.example
 └── README.md
 ```
 
-## 4. Module boundaries and responsibilities
+## 3. Module Boundaries & Responsibilities
 
-| Module | Owns | Must not do |
-|--------|------|-------------|
-| `apps/web` | UI, presentation, user interactions | Direct DB access, token handling, raw secret display |
-| `apps/api` | AuthN/AuthZ, validation, tenant scoping, audit, job creation | Execute scanners, hold installation tokens beyond retrieval |
-| `apps/worker` | Job orchestration, ingestion coordination, pipeline execution | Trust repository content, expose tokens to scanners |
-| `services/scanner-runner` | Isolated scanner process execution, output capture | Write to DB, interpolate shell input, access tokens |
-| `packages/scanners` | Adapter contract, safe spawning, output parsing | Persist findings |
-| `packages/findings` | Canonical schema, normalization, fingerprints, dedupe, lifecycle | Call scanners directly |
-| `packages/security` | Redaction, keyed HMAC fingerprints, path validation | Be bypassed by other modules |
-| `packages/ai` | Provider abstraction, structured analysis, redaction gate | Invent findings, receive secrets |
-| `packages/database` | Schema, migrations, persistence | Enforce tenant isolation in the browser |
+| Module | Owns | Must Not Do |
+|---|---|---|
+| `apps/web` | UI, presentation, authenticated developer workflows | Direct DB access, GitHub token handling, raw secret display |
+| `apps/api` | AuthN/AuthZ, Zod validation, tenant scoping, audit logging, scan job creation, report streaming | Execute scanners synchronously, expose installation tokens |
+| `apps/worker` | BullMQ orchestration, trusted GitHub ingestion, pipeline persistence, artifact archival | Trust repository content, pass tokens into scanner environment |
+| `services/scanner-runner` | Isolated scanner execution, workspace sanitization, resource limits, immediate raw-output disposal | Write to DB, interpolate shell input, access network/cloud/GitHub creds |
+| `packages/scanners` | `ScannerAdapter` contract, safe `spawn(..., { shell: false })`, output parsing, error classification | Persist findings or bypass binary allowlist |
+| `packages/findings` | Canonical schema, normalization, category fingerprinting, dedupe, lifecycle, comparison, exports | Execute scanners directly or emit unredacted secrets |
+| `packages/security` | Redaction, HKDF+HMAC fingerprints, path/symlink/SSRF guards, prompt fencing, redacting logger | Be bypassed by other modules |
+| `packages/ai` | Provider abstraction, pre-LLM redaction gate, structured Zod analysis, scoped Advisor | Invent findings, suppress alerts, execute tools, receive plaintext secrets |
+| `packages/database` | Drizzle schema, SQL migrations, PostgreSQL / PGlite client, seed script | Rely on frontend filtering for tenant isolation |
 
-## 5. Request and scan flows
+## 4. Scan States & Failure Transparency
 
-### 5.1 Scan initiation
-
-```
-Developer clicks "Scan"
-  → API authenticates and authorizes project ownership
-  → API validates request (Zod) and applies idempotency key
-  → API creates scan record (QUEUED) and enqueues BullMQ job
-  → Worker claims job, updates state INITIALIZING → CLONING
-  → Trusted ingestion retrieves repository + history via installation token
-  → Worker mounts workspace into isolated runner
-  → Runner executes Semgrep, Trivy, Gitleaks independently
-  → Worker parses/normalizes/redacts/deduplicates/persists findings
-  → Optional AI analysis on selected findings
-  → Scan transitions to COMPLETED / COMPLETED_WITH_ERRORS / FAILED
-  → Dashboard reflects results
-```
-
-### 5.2 Verification flow
-
-A later scan compares fingerprints against previous scans:
-
-- detected again → recurring / still open
-- not detected → "not detected in latest scan" (not automatically "fixed")
-- new fingerprint → newly introduced
-- verification success is stated only "within scanned scope"
-
-## 6. Scan states
-
-```
+```text
 QUEUED → INITIALIZING → CLONING → SCANNING → ANALYZING
        → COMPLETED | COMPLETED_WITH_ERRORS | FAILED | CANCELLED
 ```
 
-Scanner-level outcomes must be distinguishable: success with findings, success with zero findings, partial results, failure, timeout, cancellation, scanner unavailable.
+Per-scanner outcomes are tracked independently in `scanner_runs` (`SUCCESS`, `FAILED`, `TIMEOUT`, `CANCELLED`, `PARTIAL`, `UNAVAILABLE`) with exact scanner version, ruleset version, exit code, duration, error class, and scope limitations. A failed or partial scanner never produces a clean verification result.
 
-## 7. Technology decisions
+## 5. Database Schema, Key Indexes & Retention
 
-| Concern | Choice | Rationale |
-|---------|--------|-----------|
-| Frontend | Next.js + React + TypeScript + Tailwind | Modern developer-tool UX, type-safe contracts |
-| API | Node.js LTS + Fastify + Zod | Fast, typed, strong validation story |
-| Queue | Redis + BullMQ | Mature job model with retries, timeouts, concurrency |
-| Database | PostgreSQL + Drizzle ORM | Relational integrity for finding lifecycle |
-| Scanners | Semgrep, Trivy, Gitleaks | Covers SAST, SCA/misconfig, secrets |
-| AI | Provider-agnostic adapter, OpenAI-compatible | Works with or without an API key |
-| Storage | S3-compatible (MinIO local) | Artifact retention and portability |
-| Local env | Docker Compose | Reproducible development |
+19 normalized tables in PostgreSQL 16 via Drizzle ORM (`packages/database/migrations/0001_initial.sql`):
+- **Identity & Tenancy:** `users`, `organizations`, `organization_members`, `user_sessions`
+- **Integrations & Projects:** `integrations`, `github_installations`, `projects`, `project_repositories`
+- **Scanning & Artifacts:** `scans`, `scanner_runs`, `scanner_metadata`, `scan_artifacts`
+- **Findings & Lifecycle:** `findings`, `finding_occurrences`, `finding_status_history`, `finding_ai_analyses`, `finding_evidence`
+- **Governance:** `audit_events`, `security_policies`
 
-No second ORM, queue, or competing framework is introduced.
+Key indexes & retention controls:
+- `UNIQUE(project_id, fingerprint)` on `findings` for deterministic cross-scan upserts.
+- `INDEX(organization_id, project_id, status, severity)` on `findings` for fast tenant-scoped dashboard/filter queries.
+- `INDEX(organization_id, secret_fingerprint)` on `findings` for tenant-isolated credential correlation.
+- `UNIQUE(project_id, idempotency_key) WHERE idempotency_key IS NOT NULL` on `scans` for idempotent scan creation.
+- `INDEX(expires_at)` on `scan_artifacts` enforcing configurable `ARTIFACT_RETENTION_DAYS` (default 30 days).
 
-## 8. Isolation and trust boundaries
+## 6. Observability & Cost Controls
 
-1. **Trusted ingestion** uses short-lived GitHub installation tokens and retrieves source through approved endpoints. It cannot be invoked with arbitrary user URLs.
-2. **Untrusted execution** happens in an ephemeral workspace inside a scanner runner with no Docker socket, no cloud credentials, no metadata endpoint access, restricted egress, and CPU/memory/disk/process/time limits.
-3. **Findings pipeline** treats scanner output as untrusted data, parses defensively, and redacts secrets before persistence.
-4. **AI boundary** receives only sanitized, scoped context and never raw repository content or secrets.
-
-Local development may use a clearly labeled isolation profile; it must not be silently treated as production-grade isolation. See `docs/architecture/security-threat-model.md`.
-
-## 9. Observability
-
-Structured logs with correlation IDs, scan/scanner latency and failure metrics, queue depth and processing latency, DB health checks, AI latency/token/failure metrics, and ingestion failure metrics. Telemetry must never contain credentials, tokens, plaintext secrets, or sensitive source code.
-
-## 10. Cost controls
-
-Configurable repository size, scan duration, concurrent scans per organization, worker resources, AI context size, model token cap, AI timeout, retries, and artifact retention. AI is invoked only when configured and only for selected findings after deterministic scanning.
+- Structured JSON logs (`packages/security/src/logger.ts`) carry `correlationId`, `organizationId`, and `scanId` and automatically scrub tokens, passwords, private keys, and authorization headers.
+- `/metrics` exposes Prometheus counters/histograms for HTTP requests, scan counts/durations, scanner durations/failures, and AI latency/token usage/failures.
+- Configurable limits: `MAX_REPO_SIZE_MB`, `MAX_FILES_PER_SCAN`, `SCANNER_TIMEOUT_MS`, `MAX_SCAN_DURATION_MS`, `MAX_CONCURRENT_SCANS_PER_ORG`, `MAX_GIT_HISTORY_COMMITS`, `AI_MAX_CONTEXT_CHARS`, `AI_MAX_TOKENS`, `AI_TIMEOUT_MS`, `AI_MAX_RETRIES`, and `ARTIFACT_RETENTION_DAYS`.
