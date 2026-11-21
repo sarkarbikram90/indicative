@@ -4,7 +4,7 @@ import { z } from "zod";
 import { loadConfig } from "@indicative/config";
 import { createRedactingLogger } from "@indicative/security";
 import { createDefaultScannerRegistry } from "./adapters/registry.js";
-import { createResourceLimits } from "./resource-limits/limits.js";
+import { createResourceLimits, describeSandboxRuntime } from "./resource-limits/limits.js";
 import { IsolatedScannerRunner } from "./execution/runner.js";
 
 const executeBodySchema = z.object({
@@ -41,10 +41,14 @@ export function buildScannerRunnerServer() {
   const limits = createResourceLimits({
     maxRepoSizeBytes: config.MAX_REPO_SIZE_MB * 1024 * 1024,
     maxFilesPerScan: config.MAX_FILES_PER_SCAN,
+    maxReportBytes: config.SCANNER_MAX_REPORT_BYTES,
     scannerTimeoutMs: config.SCANNER_TIMEOUT_MS,
     maxScanDurationMs: config.MAX_SCAN_DURATION_MS,
-    maxGitHistoryCommits: config.MAX_GIT_HISTORY_COMMITS
+    maxGitHistoryCommits: config.MAX_GIT_HISTORY_COMMITS,
+    sandboxRuntime: config.SCANNER_SANDBOX_RUNTIME
   });
+
+  const runtimeDescriptor = describeSandboxRuntime(config.SCANNER_SANDBOX_RUNTIME);
 
   const runner = new IsolatedScannerRunner({
     registry,
@@ -59,10 +63,9 @@ export function buildScannerRunnerServer() {
     const health = await runner.healthCheck();
     return {
       status: health.ok ? "ok" : "degraded",
-      isolationProfile:
-        config.NODE_ENV === "production"
-          ? "isolated-container-requires-microvm-for-multi-tenant"
-          : "local-isolated-runner",
+      sandboxRuntime: runtimeDescriptor.runtime,
+      productionMultiTenantReady: runtimeDescriptor.productionMultiTenantReady,
+      isolationSummary: runtimeDescriptor.isolationSummary,
       scanners: health.scanners
     };
   });

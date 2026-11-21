@@ -155,7 +155,7 @@ npm run test:regression
 - [Implementation Plan](docs/engineering/implementation-plan.md)
 - [Architecture Decision Records (ADRs)](docs/engineering/architecture-decisions.md)
 - [Production-Readiness Assessment & Cost Model](docs/engineering/production-readiness.md)
-- [Future Performance Note (Optional Rust Hot-Path Evaluation)](Suggetion.md)
+- [Rust Performance Evaluation (Objective ADR-014 Criteria)](docs/engineering/rust-performance-evaluation.md)
 
 ---
 

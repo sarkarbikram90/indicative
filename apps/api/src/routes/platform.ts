@@ -36,9 +36,9 @@ import {
 } from "@indicative/database";
 import {
   assertValidStatusTransition,
-  exportReportAsCsv,
-  exportReportAsJson,
-  exportReportAsSarif,
+  streamReportAsCsv,
+  streamReportAsJson,
+  streamReportAsSarif,
   type ReportExportContext
 } from "@indicative/findings";
 import type { AiSecurityAnalyst } from "@indicative/ai";
@@ -1430,35 +1430,35 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
       });
 
       if (format === "sarif") {
-        const sarif = exportReportAsSarif(exportCtx);
+        const sarifStream = streamReportAsSarif(exportCtx);
         return reply
           .header("Content-Type", "application/sarif+json; charset=utf-8")
           .header(
             "Content-Disposition",
             `attachment; filename="indicative-scan-${scanId.slice(0, 8)}.sarif.json"`
           )
-          .send(sarif);
+          .send(sarifStream);
       }
 
       if (format === "csv") {
-        const csv = exportReportAsCsv(exportCtx);
+        const csvStream = streamReportAsCsv(exportCtx);
         return reply
           .header("Content-Type", "text/csv; charset=utf-8")
           .header(
             "Content-Disposition",
             `attachment; filename="indicative-scan-${scanId.slice(0, 8)}.csv"`
           )
-          .send(csv);
+          .send(csvStream);
       }
 
-      const json = exportReportAsJson(exportCtx);
+      const jsonStream = streamReportAsJson(exportCtx);
       return reply
         .header("Content-Type", "application/json; charset=utf-8")
         .header(
           "Content-Disposition",
           `attachment; filename="indicative-scan-${scanId.slice(0, 8)}.json"`
         )
-        .send(json);
+        .send(jsonStream);
     }
   );
 }

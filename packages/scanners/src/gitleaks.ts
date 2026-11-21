@@ -18,6 +18,7 @@ import {
   normalizeRepoRelativePath,
   redactSecretsInText
 } from "@indicative/security";
+import { readBoundedTextFile, ScannerReportSizeExceededError } from "./boundedReader.js";
 import { classifyProcessError, safeSpawnBinary } from "./process.js";
 
 export interface GitleaksAdapterConfig {
@@ -301,8 +302,20 @@ export class GitleaksScannerAdapter implements ScannerAdapter {
 
       let rawJson = "[]";
       try {
-        rawJson = await fs.readFile(tmpReport, "utf8");
-      } catch {
+        const read = await readBoundedTextFile(tmpReport, context.maxReportBytes);
+        rawJson = read.content;
+      } catch (err) {
+        if (err instanceof ScannerReportSizeExceededError) {
+          return {
+            ok: false,
+            status: "FAILED",
+            errorClass: "RESOURCE_LIMIT",
+            errorMessage: err.message,
+            exitCode: execRes.exitCode,
+            durationMs: execRes.durationMs,
+            findings: []
+          };
+        }
         // Gitleaks writes no report file or empty array when zero leaks found
         rawJson = "[]";
       }

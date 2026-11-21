@@ -16,4 +16,4 @@ All MVP phases (Phases 0–7) defined in `Agent.md §24` have been implemented a
 | **Phase 7** | Verification & Hardening | Regression corpus (`vulnerable-app` + `clean-app`), unit/integration/security/E2E suites, tenant isolation tests, runner hardening tests, production-readiness assessment | `29/29` tests pass; measured corpus baseline: `20/20` recall, `1.0` precision, `0` FPR, `0` parsing/scanner failures | ✅ Complete |
 
 ## Post-MVP Hardening Roadmap
-See [Production-Readiness Assessment](production-readiness.md) and [Future Performance Note](../../Suggetion.md) for microVM/gVisor multi-tenant isolation, PostgreSQL RLS, Cloud KMS key management, automated webhook scans, and optional Rust hot-path profiling.
+See [Production-Readiness Assessment](production-readiness.md) and [Rust Performance Evaluation](rust-performance-evaluation.md) for microVM/gVisor multi-tenant isolation, PostgreSQL RLS, Cloud KMS key management, automated webhook scans, and objective ADR-014 profiling criteria.

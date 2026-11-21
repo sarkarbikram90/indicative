@@ -9,6 +9,8 @@ import {
   parseAndRedactGitleaksOutput,
   parseSemgrepOutput,
   parseTrivyOutput,
+  readBoundedTextFile,
+  ScannerReportSizeExceededError,
   SemgrepScannerAdapter,
   TrivyScannerAdapter
 } from "./index.js";
@@ -75,6 +77,20 @@ describe("@indicative/scanners — unit & independent real scanner verification"
     expect(parsed).toHaveLength(1);
     expect(parsed[0]!.secretFingerprint).toMatch(/^hmac-sha256:v1:/);
     expect(JSON.stringify(parsed[0])).not.toContain(dummySecret);
+  });
+
+  it("rejects oversized scanner JSON files before reading into V8 heap", async () => {
+    const tmpFile = path.join(os.tmpdir(), `ind-oversized-${Date.now()}.json`);
+    await fs.writeFile(tmpFile, "x".repeat(4096), "utf8");
+    try {
+      await expect(readBoundedTextFile(tmpFile, 1024)).rejects.toThrow(
+        ScannerReportSizeExceededError
+      );
+      const ok = await readBoundedTextFile(tmpFile, 8192);
+      expect(ok.sizeBytes).toBe(4096);
+    } finally {
+      await fs.rm(tmpFile, { force: true });
+    }
   });
 
   it("demonstrates REAL Semgrep, Trivy, and Gitleaks independently against fixtures (Phase 3 Gate)", async () => {

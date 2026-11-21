@@ -176,6 +176,7 @@ export class IsolatedScannerRunner {
             hasGitHistory: prepared.hasGitHistory,
             isShallowClone: prepared.isShallowClone,
             maxGitHistoryCommits: this.limits.maxGitHistoryCommits,
+            maxReportBytes: this.limits.maxReportBytes,
             timeoutMs: this.limits.scannerTimeoutMs,
             secretFingerprintKey: request.secretFingerprintKey,
             signal: scanAbort.signal

@@ -117,6 +117,7 @@ export interface ScannerExecutionContext {
   hasGitHistory: boolean;
   isShallowClone: boolean;
   maxGitHistoryCommits: number;
+  maxReportBytes?: number;
   timeoutMs: number;
   secretFingerprintKey: string;
   signal?: AbortSignal;

@@ -60,10 +60,19 @@ const envSchema = z.object({
   GITHUB_APP_WEBHOOK_SECRET: z.string().default(""),
 
   SCANNER_RUNNER_MODE: z.enum(["http", "local"]).default("local"),
+  SCANNER_SANDBOX_RUNTIME: z
+    .enum(["local-process", "docker", "gvisor", "kata"])
+    .default("local-process"),
   SCANNER_RUNNER_URL: z.string().url().default("http://localhost:4100"),
   SCANNER_RUNNER_HOST: z.string().default("0.0.0.0"),
   SCANNER_RUNNER_PORT: z.coerce.number().int().min(1).max(65535).default(4100),
   SCANNER_WORKSPACES_ROOT: z.string().default(path.resolve(process.cwd(), ".indicative-tmp")),
+  SCANNER_MAX_REPORT_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1024 * 1024)
+    .max(512 * 1024 * 1024)
+    .default(64 * 1024 * 1024),
 
   SEMGREP_BIN: z.string().default("semgrep"),
   TRIVY_BIN: z.string().default("trivy"),

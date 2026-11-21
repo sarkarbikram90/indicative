@@ -13,6 +13,7 @@ import type {
   ScannerHealth
 } from "@indicative/contracts";
 import { normalizeRepoRelativePath, redactSecretsInText } from "@indicative/security";
+import { readBoundedTextFile, ScannerReportSizeExceededError } from "./boundedReader.js";
 import { classifyProcessError, safeSpawnBinary } from "./process.js";
 
 export interface SemgrepAdapterConfig {
@@ -309,8 +310,26 @@ export class SemgrepScannerAdapter implements ScannerAdapter {
 
       let rawJson: string;
       try {
-        rawJson = await fs.readFile(tmpReport, "utf8");
-      } catch {
+        const read = await readBoundedTextFile(tmpReport, context.maxReportBytes);
+        rawJson = read.content;
+      } catch (err) {
+        if (err instanceof ScannerReportSizeExceededError) {
+          return {
+            scanner: this.name,
+            scannerVersion: this.version,
+            rulesetVersion: this.rulesetVersion,
+            capabilities: this.capabilities,
+            status: "FAILED",
+            errorClass: "RESOURCE_LIMIT",
+            errorMessage: err.message,
+            exitCode: execRes.exitCode,
+            startedAt,
+            completedAt,
+            durationMs: execRes.durationMs,
+            limitations: [],
+            findings: []
+          };
+        }
         rawJson = execRes.stdout;
       }
 

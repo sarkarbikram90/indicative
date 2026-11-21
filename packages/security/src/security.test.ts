@@ -163,4 +163,27 @@ describe("@indicative/security", () => {
     expect(res.sanitizedDataBlock.startsWith("<UNTRUSTED_REPOSITORY_DATA>")).toBe(true);
     expect(res.sanitizedDataBlock.endsWith("</UNTRUSTED_REPOSITORY_DATA>")).toBe(true);
   });
+
+  it("resists ReDoS and redacts secrets in multi-megabyte minified payloads in linear time", () => {
+    const dummyAws = ["AKIA", "QYLPMN5HHHFPZAM2"].join("");
+    const pemHeader = ["-----BEGIN ", "RSA PRIVATE KEY-----"].join("");
+    const adversarialPem = pemHeader.repeat(5_000) + "A".repeat(200_000);
+    const adversarialAssign = `password=${" ".repeat(100_000)}!`;
+    // Place dummy AWS key right across a 64KB chunk boundary inside a 2MB minified JS bundle
+    const minifiedPrefix = `${"a".repeat(65_528)}="`;
+    const minifiedSuffix = `";${"b".repeat(2_000_000)}`;
+    const hugeMinified = `${minifiedPrefix}${dummyAws}${minifiedSuffix}`;
+
+    const start = Date.now();
+    const outPem = redactSecretsInText(adversarialPem);
+    const outAssign = redactSecretsInText(adversarialAssign);
+    const outMinified = redactSecretsInText(hugeMinified);
+    const elapsedMs = Date.now() - start;
+
+    expect(elapsedMs).toBeLessThan(2000);
+    expect(outPem.includes(pemHeader)).toBe(false);
+    expect(outAssign.length).toBeGreaterThan(0);
+    expect(outMinified.includes(dummyAws)).toBe(false);
+    expect(outMinified.includes("[REDACTED:aws-access-key:")).toBe(true);
+  });
 });

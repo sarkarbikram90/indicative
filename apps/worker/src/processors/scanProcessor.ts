@@ -168,6 +168,22 @@ export async function executeScanPipeline(
 
   let cleanupWorkspace: (() => Promise<void>) | undefined;
 
+  let peakRssBytes = process.memoryUsage().rss;
+  let peakHeapUsedBytes = process.memoryUsage().heapUsed;
+  const sampleMemory = () => {
+    const mem = process.memoryUsage();
+    if (mem.rss > peakRssBytes) peakRssBytes = mem.rss;
+    if (mem.heapUsed > peakHeapUsedBytes) peakHeapUsedBytes = mem.heapUsed;
+  };
+  const stageTimings = {
+    ingestMs: 0,
+    scanMs: 0,
+    parseNormalizeMs: 0,
+    persistMs: 0,
+    aiMs: 0,
+    artifactMs: 0
+  };
+
   try {
     // 1. INITIALIZING
     await deps.db
@@ -199,6 +215,7 @@ export async function executeScanPipeline(
       .set({ status: "CLONING", updatedAt: new Date() })
       .where(eq(scans.id, scanId));
 
+    const ingestStart = Date.now();
     const ingested = await ingestRepositoryForScan({
       scanId,
       provider: repoRow.provider === "LOCAL_FIXTURE" ? "LOCAL_FIXTURE" : "GITHUB",
@@ -210,6 +227,9 @@ export async function executeScanPipeline(
       timeoutMs: Math.min(deps.config.SCANNER_TIMEOUT_MS, 90_000),
       githubAppClient: deps.githubAppClient
     });
+    stageTimings.ingestMs = Date.now() - ingestStart;
+    metrics.observe("indicative_scan_stage_duration_ms", stageTimings.ingestMs, { stage: "ingest" });
+    sampleMemory();
     cleanupWorkspace = ingested.cleanup;
 
     await deps.db
@@ -233,6 +253,7 @@ export async function executeScanPipeline(
         ? scanRow.requestedScanners
         : ["semgrep", "trivy", "gitleaks"];
 
+    const scanExecStart = Date.now();
     let runnerResp: RunnerExecutionResponse;
     if (deps.config.SCANNER_RUNNER_MODE === "http" && !deps.localRunner) {
       runnerResp = await invokeRemoteScannerRunner({
@@ -255,6 +276,9 @@ export async function executeScanPipeline(
     } else {
       throw new Error("SCANNER_RUNNER_UNCONFIGURED: Neither localRunner nor HTTP runner is configured.");
     }
+    stageTimings.scanMs = Date.now() - scanExecStart;
+    metrics.observe("indicative_scan_stage_duration_ms", stageTimings.scanMs, { stage: "scan" });
+    sampleMemory();
 
     // Persist scanner_runs provenance records
     const persistedScannerRuns: ScannerRunSummary[] = [];
@@ -314,6 +338,7 @@ export async function executeScanPipeline(
       .set({ status: "ANALYZING", updatedAt: new Date() })
       .where(eq(scans.id, scanId));
 
+    const normalizeStart = Date.now();
     const allRawFindings = runnerResp.results.flatMap((r) => r.findings);
     const normalizedBundles = normalizeAndDeduplicateFindings({
       organizationId: scanRow.organizationId,
@@ -321,6 +346,13 @@ export async function executeScanPipeline(
       scanId,
       rawFindings: allRawFindings
     });
+    stageTimings.parseNormalizeMs = Date.now() - normalizeStart;
+    metrics.observe("indicative_scan_stage_duration_ms", stageTimings.parseNormalizeMs, {
+      stage: "parse_normalize"
+    });
+    sampleMemory();
+
+    const persistStart = Date.now();
 
     // Fetch previous completed scan and existing project findings for comparison/verification
     const previousScans = await deps.db
@@ -554,8 +586,14 @@ export async function executeScanPipeline(
     }
 
     comparisonPlan.comparison.newFindingIds = newFindingIds;
+    stageTimings.persistMs = Date.now() - persistStart;
+    metrics.observe("indicative_scan_stage_duration_ms", stageTimings.persistMs, {
+      stage: "persist"
+    });
+    sampleMemory();
 
     // 5. OPTIONAL AI ANALYSIS (only if requested AND configured; limited to top 5 critical/high findings)
+    const aiStart = Date.now();
     if (scanRow.runAiAnalysis && deps.aiAnalyst?.isEnabled) {
       const topFindings = persistedFindingsForReport
         .filter((f) => f.severity === "CRITICAL" || f.severity === "HIGH")
@@ -592,25 +630,15 @@ export async function executeScanPipeline(
         }
       }
     }
+    stageTimings.aiMs = Date.now() - aiStart;
+    metrics.observe("indicative_scan_stage_duration_ms", stageTimings.aiMs, { stage: "ai" });
+    sampleMemory();
 
     // 6. FINALIZE SCAN STATUS & ARCHIVE REDACTED ARTIFACTS
+    const artifactStart = Date.now();
     const finalStatus = determineFinalScanStatus(runnerResp.results);
     const completedAt = new Date();
     const durationMs = completedAt.getTime() - startedAt.getTime();
-
-    const summaryCounts = {
-      total: persistedFindingsForReport.length,
-      critical: persistedFindingsForReport.filter((f) => f.severity === "CRITICAL").length,
-      high: persistedFindingsForReport.filter((f) => f.severity === "HIGH").length,
-      medium: persistedFindingsForReport.filter((f) => f.severity === "MEDIUM").length,
-      low: persistedFindingsForReport.filter((f) => f.severity === "LOW").length,
-      info: persistedFindingsForReport.filter((f) => f.severity === "INFO").length,
-      unknown: persistedFindingsForReport.filter((f) => f.severity === "UNKNOWN").length,
-      newFindings: newFindingIds.length,
-      recurringFindings: comparisonPlan.comparison.recurringFindingIds.length,
-      notDetectedFindings: comparisonPlan.comparison.notDetectedFindingIds.length,
-      reopenedFindings: comparisonPlan.comparison.reopenedFindingIds.length
-    };
 
     const allLimitations: ScannerLimitation[] = runnerResp.limitations;
 
@@ -677,6 +705,39 @@ export async function executeScanPipeline(
       }
     ]);
 
+    stageTimings.artifactMs = Date.now() - artifactStart;
+    metrics.observe("indicative_scan_stage_duration_ms", stageTimings.artifactMs, {
+      stage: "artifact"
+    });
+    sampleMemory();
+
+    const peakRssMb = Math.round((peakRssBytes / (1024 * 1024)) * 10) / 10;
+    const peakHeapUsedMb = Math.round((peakHeapUsedBytes / (1024 * 1024)) * 10) / 10;
+    metrics.setGauge("indicative_worker_peak_rss_bytes", peakRssBytes);
+    metrics.setGauge("indicative_worker_heap_used_bytes", peakHeapUsedBytes);
+
+    const summaryCounts = {
+      total: persistedFindingsForReport.length,
+      critical: persistedFindingsForReport.filter((f) => f.severity === "CRITICAL").length,
+      high: persistedFindingsForReport.filter((f) => f.severity === "HIGH").length,
+      medium: persistedFindingsForReport.filter((f) => f.severity === "MEDIUM").length,
+      low: persistedFindingsForReport.filter((f) => f.severity === "LOW").length,
+      info: persistedFindingsForReport.filter((f) => f.severity === "INFO").length,
+      unknown: persistedFindingsForReport.filter((f) => f.severity === "UNKNOWN").length,
+      newFindings: newFindingIds.length,
+      recurringFindings: comparisonPlan.comparison.recurringFindingIds.length,
+      notDetectedFindings: comparisonPlan.comparison.notDetectedFindingIds.length,
+      reopenedFindings: comparisonPlan.comparison.reopenedFindingIds.length,
+      ingestMs: stageTimings.ingestMs,
+      scanMs: stageTimings.scanMs,
+      parseNormalizeMs: stageTimings.parseNormalizeMs,
+      persistMs: stageTimings.persistMs,
+      aiMs: stageTimings.aiMs,
+      artifactMs: stageTimings.artifactMs,
+      peakRssMb,
+      peakHeapUsedMb
+    };
+
     await deps.db
       .update(scans)
       .set({
@@ -700,7 +761,10 @@ export async function executeScanPipeline(
       metadata: {
         status: finalStatus,
         findingsCount: persistedFindingsForReport.length,
-        durationMs
+        durationMs,
+        stageTimings,
+        peakRssMb,
+        peakHeapUsedMb
       }
     });
 
@@ -710,7 +774,10 @@ export async function executeScanPipeline(
     log.info("Scan pipeline completed", {
       status: finalStatus,
       findingsCount: persistedFindingsForReport.length,
-      durationMs
+      durationMs,
+      stageTimings,
+      peakRssMb,
+      peakHeapUsedMb
     });
 
     return {

@@ -13,8 +13,10 @@ import {
 } from "@indicative/database";
 import { AiSecurityAnalyst, DisabledAiProvider } from "@indicative/ai";
 import {
+  buildHardenedOciArgs,
   createDefaultScannerRegistry,
   createResourceLimits,
+  describeSandboxRuntime,
   IsolatedScannerRunner
 } from "@indicative/scanner-runner";
 import {
@@ -256,5 +258,28 @@ describe("Security Controls: Tenant Isolation, Auth/CSRF, Production Guardrails 
     await expect(
       storage.putObject("leak.json", JSON.stringify({ secret: dummyGh }), "application/json")
     ).rejects.toThrow(/SECURITY_VIOLATION/);
+  });
+
+  it("distinguishes gVisor/Kata multi-tenant sandboxes from Docker and generates hardened OCI args", () => {
+    expect(describeSandboxRuntime("docker").productionMultiTenantReady).toBe(false);
+    expect(describeSandboxRuntime("local-process").productionMultiTenantReady).toBe(false);
+    expect(describeSandboxRuntime("gvisor").productionMultiTenantReady).toBe(true);
+    expect(describeSandboxRuntime("kata").productionMultiTenantReady).toBe(true);
+
+    const gvisorArgs = buildHardenedOciArgs({
+      image: "indicative/scanner-runner:0.1.0",
+      workspaceHostPath: "/tmp/ws-1",
+      limits: createResourceLimits({ sandboxRuntime: "gvisor" }),
+      seccompProfilePath: "/etc/indicative/seccomp-scanner.json",
+      command: ["gitleaks", "version"]
+    });
+
+    expect(gvisorArgs).toContain("--runtime=runsc");
+    expect(gvisorArgs).toContain("--network=none");
+    expect(gvisorArgs).toContain("--read-only");
+    expect(gvisorArgs).toContain("--cap-drop=ALL");
+    expect(gvisorArgs).toContain("--security-opt=no-new-privileges:true");
+    expect(gvisorArgs).toContain("--security-opt=seccomp=/etc/indicative/seccomp-scanner.json");
+    expect(gvisorArgs.join(" ")).not.toContain("docker.sock");
   });
 });

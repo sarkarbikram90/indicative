@@ -9,7 +9,10 @@ import {
   exportReportAsJson,
   exportReportAsSarif,
   isValidStatusTransition,
-  normalizeAndDeduplicateFindings
+  normalizeAndDeduplicateFindings,
+  streamReportAsCsv,
+  streamReportAsJson,
+  streamReportAsSarif
 } from "./index.js";
 
 describe("@indicative/findings", () => {
@@ -175,7 +178,7 @@ describe("@indicative/findings", () => {
     expect(plan.recurringDecisions[0]?.nextStatus).toBe("REOPENED");
   });
 
-  it("exports redacted JSON, SARIF 2.1.0, and CSV with scanner provenance", () => {
+  it("exports redacted JSON, SARIF 2.1.0, and CSV with scanner provenance", async () => {
     const normalized = normalizeAndDeduplicateFindings({
       organizationId: "org-1",
       projectId: "proj-1",
@@ -243,5 +246,24 @@ describe("@indicative/findings", () => {
     const csv = exportReportAsCsv(ctx);
     expect(csv).toContain("CVE-2020-8203");
     expect(csv).toContain("lodash");
+
+    // Verify streaming JSON, SARIF, and CSV exporters produce valid equivalent output
+    const readStream = async (stream: NodeJS.ReadableStream) => {
+      let out = "";
+      for await (const chunk of stream) out += chunk.toString();
+      return out;
+    };
+
+    const streamedJson = JSON.parse(await readStream(streamReportAsJson(ctx)));
+    expect(streamedJson.findings).toHaveLength(1);
+    expect(streamedJson.scannerProvenance[0].version).toBe("0.76.2");
+
+    const streamedSarif = JSON.parse(await readStream(streamReportAsSarif(ctx)));
+    expect(streamedSarif.version).toBe("2.1.0");
+    expect(streamedSarif.runs[0].results[0].ruleId).toBe("CVE-2020-8203");
+
+    const streamedCsv = await readStream(streamReportAsCsv(ctx));
+    expect(streamedCsv).toContain("CVE-2020-8203");
+    expect(streamedCsv).toContain("lodash");
   });
 });

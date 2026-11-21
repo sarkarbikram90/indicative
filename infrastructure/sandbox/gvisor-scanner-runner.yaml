@@ -1,0 +1,95 @@
+# Hardened Kubernetes Deployment & NetworkPolicy for Indicative Scanner Runner
+# Uses gVisor RuntimeClass (swap to `kata` for Kata Containers microVMs).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: indicative-scanner-runner
+  namespace: indicative
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: indicative-scanner-runner
+  template:
+    metadata:
+      labels:
+        app: indicative-scanner-runner
+    spec:
+      runtimeClassName: gvisor # Use "kata" for hardware microVM isolation
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: scanner-runner
+          image: indicative/scanner-runner:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 4100
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: SCANNER_SANDBOX_RUNTIME
+              value: "gvisor"
+            - name: SCANNER_RUNNER_SHARED_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: indicative-runner-secrets
+                  key: shared-secret
+            - name: SECRET_FINGERPRINT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: indicative-runner-secrets
+                  key: fingerprint-key
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: workspaces
+              mountPath: /shared-workspaces
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Mi
+        - name: workspaces
+          emptyDir:
+            sizeLimit: 2Gi
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: scanner-runner-deny-egress
+  namespace: indicative
+spec:
+  podSelector:
+    matchLabels:
+      app: indicative-scanner-runner
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: indicative-worker
+      ports:
+        - protocol: TCP
+          port: 4100
+  egress: [] # Zero outbound network access (blocks internet & cloud metadata 169.254.169.254)

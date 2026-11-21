@@ -177,6 +177,19 @@ describe("End-to-End: Complete Indicative Workflow with REAL Semgrep, Trivy, and
       expect(run.status).toBe("SUCCESS");
     }
 
+    // Verify stage-level latency & peak RSS telemetry recorded for objective profiling (ADR-014)
+    expect(typeof scan1Body.scan.summaryCounts.ingestMs).toBe("number");
+    expect(typeof scan1Body.scan.summaryCounts.scanMs).toBe("number");
+    expect(typeof scan1Body.scan.summaryCounts.parseNormalizeMs).toBe("number");
+    expect(typeof scan1Body.scan.summaryCounts.persistMs).toBe("number");
+    expect(typeof scan1Body.scan.summaryCounts.artifactMs).toBe("number");
+    expect(scan1Body.scan.summaryCounts.peakRssMb).toBeGreaterThan(0);
+
+    const metricsRes = await api.inject({ method: "GET", url: "/metrics" });
+    expect(metricsRes.statusCode).toBe(200);
+    expect(metricsRes.body).toContain("indicative_scan_stage_duration_ms");
+    expect(metricsRes.body).toContain("indicative_worker_peak_rss_bytes");
+
     // 7-8. Verify normalized findings across all 4 categories (SAST, SCA, SECRET, IAC)
     const findingsRes = await api.inject({
       method: "GET",

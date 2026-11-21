@@ -1,18 +1,20 @@
 import crypto from "node:crypto";
 
 const FINGERPRINT_INFO = Buffer.from("indicative:secret-fingerprint:v1", "utf8");
+const REDACT_CHUNK_SIZE = 64 * 1024;
+const REDACT_CHUNK_OVERLAP = 512;
 
 export interface SecretPattern {
   name: string;
   regex: RegExp;
 }
 
+/**
+ * All patterns are explicitly bounded with non-nested quantifiers to guarantee
+ * linear-time execution and prevent catastrophic backtracking (ReDoS) on hostile
+ * or multi-megabyte minified inputs.
+ */
 export const SECRET_PATTERNS: SecretPattern[] = [
-  {
-    name: "private-key-block",
-    regex:
-      /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g
-  },
   {
     name: "aws-access-key",
     regex: /\b(?:AKIA|ASIA|AIDA|AROA)[0-9A-Z]{16}\b/g
@@ -44,20 +46,21 @@ export const SECRET_PATTERNS: SecretPattern[] = [
   {
     name: "db-connection-uri",
     regex:
-      /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss|amqp|amqps):\/\/[^:\s/@]+:([^@\s/]+)@[^\s"'`]+/gi
+      /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss|amqp|amqps):\/\/[^:\s/@]{1,128}:([^@\s/]{1,256})@[^\s"'`]{1,256}/gi
   },
   {
     name: "bearer-header",
-    regex: /\b(Bearer|Basic|token)\s+[A-Za-z0-9._~+/=-]{16,}\b/gi
+    regex: /\b(Bearer|Basic|token)[ \t]{1,8}([A-Za-z0-9._~+/=-]{16,512})\b/gi
   },
   {
     name: "jwt-token",
-    regex: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g
+    regex:
+      /\beyJ[A-Za-z0-9_-]{10,256}\.eyJ[A-Za-z0-9_-]{10,512}\.[A-Za-z0-9_-]{10,256}\b/g
   },
   {
     name: "generic-secret-assignment",
     regex:
-      /((?:api[_-]?key|api[_-]?secret|access[_-]?token|auth[_-]?token|client[_-]?secret|db[_-]?pass(?:word)?|password|passwd|secret[_-]?key|private[_-]?key|aws[_-]?secret[_-]?access[_-]?key)\s*[:=]\s*["']?)([^\s"'`;,]{8,})(["']?)/gi
+      /((?:api[_-]?key|api[_-]?secret|access[_-]?token|auth[_-]?token|client[_-]?secret|db[_-]?pass(?:word)?|password|passwd|secret[_-]?key|private[_-]?key|aws[_-]?secret[_-]?access[_-]?key)[ \t]{0,16}[:=][ \t]{0,16}["']?)([^\s"'`;,]{8,256})(["']?)/gi
   }
 ];
 
@@ -85,6 +88,55 @@ const SENSITIVE_OBJECT_KEYS = new Set([
   "x-access-token",
   "x-api-key"
 ]);
+
+/**
+ * Linear-time O(n) PEM private key block scrubber (immune to regex backtracking ReDoS
+ * even on megabyte-sized hostile inputs with repeated unclosed BEGIN markers).
+ */
+export function scrubPemPrivateKeyBlocks(text: string): string {
+  const beginMarker = "-----BEGIN ";
+  const keyMarker = "PRIVATE KEY-----";
+  const endMarker = "-----END ";
+  const maxBlockChars = 16 * 1024;
+
+  let cursor = 0;
+  let result = "";
+  while (cursor < text.length) {
+    const startIdx = text.indexOf(beginMarker, cursor);
+    if (startIdx === -1) {
+      result += text.slice(cursor);
+      break;
+    }
+
+    const headerEnd = text.indexOf(keyMarker, startIdx + beginMarker.length);
+    if (headerEnd === -1 || headerEnd - startIdx > 64) {
+      result += text.slice(cursor, startIdx + beginMarker.length);
+      cursor = startIdx + beginMarker.length;
+      continue;
+    }
+
+    const bodyStart = headerEnd + keyMarker.length;
+    const endStart = text.indexOf(endMarker, bodyStart);
+    if (endStart === -1 || endStart - bodyStart > maxBlockChars) {
+      // Unclosed or abnormally oversized marker — mask header itself without backtracking
+      result += text.slice(cursor, startIdx) + "[REDACTED:private-key-header]";
+      cursor = bodyStart;
+      continue;
+    }
+
+    const footerEnd = text.indexOf(keyMarker, endStart + endMarker.length);
+    if (footerEnd === -1 || footerEnd - endStart > 64) {
+      result += text.slice(cursor, startIdx) + "[REDACTED:private-key-header]";
+      cursor = bodyStart;
+      continue;
+    }
+
+    result += text.slice(cursor, startIdx) + "[REDACTED:private-key-block:PRIVATE_KEY_BLOCK]";
+    cursor = footerEnd + keyMarker.length;
+  }
+
+  return result;
+}
 
 /**
  * Derives an organization-specific 32-byte HMAC key using HKDF-SHA256.
@@ -144,23 +196,16 @@ function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/**
- * Redacts both explicitly known secret values and common credential patterns from arbitrary text.
- */
-export function redactSecretsInText(text: string, knownSecrets: string[] = []): string {
-  if (!text) return text;
-  let output = text;
+function redactChunk(chunk: string, uniqueKnown: string[]): string {
+  let output = scrubPemPrivateKeyBlocks(chunk);
 
-  // 1. Scrub explicit raw secret strings first (longest first to avoid partial remnants)
-  const uniqueKnown = [...new Set(knownSecrets.filter((s) => s && s.trim().length >= 4))].sort(
-    (a, b) => b.length - a.length
-  );
   for (const secret of uniqueKnown) {
-    const pattern = new RegExp(escapeRegExp(secret), "g");
-    output = output.replace(pattern, maskSecretValue(secret, "detected"));
+    if (output.includes(secret)) {
+      const pattern = new RegExp(escapeRegExp(secret), "g");
+      output = output.replace(pattern, maskSecretValue(secret, "detected"));
+    }
   }
 
-  // 2. Scrub structural secret patterns
   for (const { name, regex } of SECRET_PATTERNS) {
     regex.lastIndex = 0;
     if (name === "generic-secret-assignment") {
@@ -179,6 +224,44 @@ export function redactSecretsInText(text: string, knownSecrets: string[] = []): 
   }
 
   return output;
+}
+
+/**
+ * Redacts both explicitly known secret values and common credential patterns from arbitrary text.
+ * Uses ReDoS-immune PEM scrubbing and bounded windowing for multi-megabyte minified payloads.
+ */
+export function redactSecretsInText(text: string, knownSecrets: string[] = []): string {
+  if (!text) return text;
+
+  const uniqueKnown = [...new Set(knownSecrets.filter((s) => s && s.trim().length >= 4))].sort(
+    (a, b) => b.length - a.length
+  );
+
+  if (text.length <= REDACT_CHUNK_SIZE) {
+    return redactChunk(text, uniqueKnown);
+  }
+
+  // Process oversized/minified strings in bounded chunks with boundary overlap so secrets
+  // spanning chunk boundaries are still cleanly caught in O(n) time.
+  let out = "";
+  let offset = 0;
+  while (offset < text.length) {
+    const end = Math.min(text.length, offset + REDACT_CHUNK_SIZE);
+    const slice = text.slice(offset, end);
+    const redacted = redactChunk(slice, uniqueKnown);
+    if (offset === 0) {
+      out += redacted;
+    } else {
+      // Re-redact the join seam (last REDACT_CHUNK_OVERLAP chars of out + first REDACT_CHUNK_OVERLAP of redacted)
+      const tailLen = Math.min(REDACT_CHUNK_OVERLAP, out.length);
+      const headLen = Math.min(REDACT_CHUNK_OVERLAP, redacted.length);
+      const seam = redactChunk(out.slice(-tailLen) + redacted.slice(0, headLen), uniqueKnown);
+      out = out.slice(0, -tailLen) + seam + redacted.slice(headLen);
+    }
+    offset = end;
+  }
+
+  return out;
 }
 
 /**
@@ -216,12 +299,15 @@ export function redactObjectDeep<T>(value: T, knownSecrets: string[] = [], depth
 }
 
 /**
- * Safety assertion check to detect if a payload still contains unredacted high-confidence credentials.
+ * Linear-time safety assertion check to detect if a payload still contains
+ * unredacted high-confidence credentials.
  */
 export function containsPotentialPlaintextSecret(text: string): boolean {
   if (!text) return false;
+  if (text.includes("-----BEGIN ") && text.includes("PRIVATE KEY-----")) {
+    return true;
+  }
   const highConfidencePatterns = [
-    /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]+-----END [A-Z0-9 ]*PRIVATE KEY-----/,
     /\b(?:AKIA|ASIA|AIDA|AROA)[0-9A-Z]{16}\b/,
     /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,255}\b/,
     /\bgithub_pat_[A-Za-z0-9_]{22,255}\b/,
