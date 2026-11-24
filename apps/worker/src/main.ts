@@ -13,7 +13,8 @@ import {
 import { createRedactingLogger } from "@indicative/security";
 import { LocalArtifactStorage, S3ArtifactStorage } from "@indicative/shared";
 import { GitHubAppClient } from "./ingestion/githubApp.js";
-import { startBullMqWorker } from "./jobs/scanQueue.js";
+import { createBullMqEnqueuer, startBullMqWorker } from "./jobs/scanQueue.js";
+import { startSchedulePoller } from "./automation/scheduler.js";
 
 async function main() {
   const config = loadConfig();
@@ -99,14 +100,31 @@ async function main() {
     });
   });
 
+  const scheduleEnqueuer = config.ENABLE_SCHEDULER
+    ? createBullMqEnqueuer(config.REDIS_URL)
+    : undefined;
+  const schedulePoller =
+    config.ENABLE_SCHEDULER && scheduleEnqueuer
+      ? startSchedulePoller({
+          db: dbConn.db,
+          enqueuer: scheduleEnqueuer,
+          intervalMs: config.SCHEDULER_POLL_INTERVAL_MS,
+          defaultMaxConcurrentScans: config.MAX_CONCURRENT_SCANS_PER_ORG,
+          logger
+        })
+      : undefined;
+
   logger.info("Indicative worker started", {
     concurrency: config.WORKER_CONCURRENCY,
     runnerMode: config.SCANNER_RUNNER_MODE,
-    aiEnabled: aiAnalyst.isEnabled
+    aiEnabled: aiAnalyst.isEnabled,
+    schedulerEnabled: config.ENABLE_SCHEDULER
   });
 
   const shutdown = async () => {
     logger.info("Shutting down Indicative worker...");
+    schedulePoller?.stop();
+    await scheduleEnqueuer?.close();
     await close();
     await dbConn.close();
     process.exit(0);

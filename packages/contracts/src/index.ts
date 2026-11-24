@@ -3,3 +3,4 @@ export * from "./scanners.js";
 export * from "./scans.js";
 export * from "./ai.js";
 export * from "./api.js";
+export * from "./automation.js";

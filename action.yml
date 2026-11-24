@@ -1,0 +1,129 @@
+name: "Indicative CI/CD & OIDC Security Scan"
+description: "Audit GitHub Actions workflows and static AWS/Azure/GCP OIDC trust policies with SARIF Code Scanning upload and Job Summaries."
+author: "Indicative Contributors"
+
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  path:
+    description: "Repository directory to scan (relative to workspace)."
+    required: false
+    default: "."
+  policy:
+    description: "Policy enforcement mode: informational | warning | failure."
+    required: false
+    default: "warning"
+  ignore:
+    description: "Comma- or newline-separated path prefixes to exclude from scanning."
+    required: false
+    default: ""
+  sarif-file:
+    description: "Output path for SARIF 2.1.0 results."
+    required: false
+    default: "indicative-cicd.sarif"
+  upload-sarif:
+    description: "Upload SARIF results to GitHub Code Scanning (requires security-events: write)."
+    required: false
+    default: "true"
+  annotations:
+    description: "Emit GitHub Actions workflow annotations for detected findings."
+    required: false
+    default: "true"
+  step-summary:
+    description: "Append a Markdown security summary to the GitHub Actions job summary."
+    required: false
+    default: "true"
+  node-version:
+    description: "Node.js version to use for executing the Indicative analyzer."
+    required: false
+    default: "22"
+
+outputs:
+  findings-count:
+    description: "Total CI/CD and OIDC findings detected."
+    value: ${{ steps.scan.outputs.findings-count }}
+  blocking-count:
+    description: "Number of findings violating the configured policy."
+    value: ${{ steps.scan.outputs.blocking-count }}
+  policy-passed:
+    description: "Whether the scan passed the configured policy gate (true/false)."
+    value: ${{ steps.scan.outputs.policy-passed }}
+  sarif-file:
+    description: "Path to the generated SARIF 2.1.0 file."
+    value: ${{ steps.scan.outputs.sarif-file }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@39370e3970a6d050c480ffad7ff0ed4d3fdee5af # v4.1.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Install & build Indicative CI/CD analyzer
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        if [ ! -f "${ACTION_PATH}/packages/cicd-security/dist/cli.js" ]; then
+          cd "${ACTION_PATH}"
+          npm ci --ignore-scripts
+          npm --workspace @indicative/config run build
+          npm --workspace @indicative/contracts run build
+          npm --workspace @indicative/security run build
+          npm --workspace @indicative/cicd-security run build
+        fi
+
+    - name: Run Indicative CI/CD & OIDC Security Analyzer
+      id: scan
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_POLICY: ${{ inputs.policy }}
+        INPUT_IGNORE: ${{ inputs.ignore }}
+        INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
+        INPUT_ANNOTATIONS: ${{ inputs.annotations }}
+        INPUT_STEP_SUMMARY: ${{ inputs.step-summary }}
+      run: |
+        set -euo pipefail
+        TARGET_ABS="$(realpath "${INPUT_PATH}")"
+        SARIF_ABS="$(realpath -m "${INPUT_SARIF_FILE}")"
+
+        ARGS=("${TARGET_ABS}" "--format" "markdown" "--policy" "${INPUT_POLICY}" "--sarif-file" "${SARIF_ABS}")
+        if [ -n "${INPUT_IGNORE}" ]; then
+          ARGS+=("--ignore" "${INPUT_IGNORE}")
+        fi
+        if [ "${INPUT_ANNOTATIONS}" = "true" ]; then
+          ARGS+=("--annotations")
+        fi
+        if [ "${INPUT_STEP_SUMMARY}" = "true" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+          ARGS+=("--summary-file" "${GITHUB_STEP_SUMMARY}")
+        fi
+        if [ -n "${GITHUB_OUTPUT:-}" ]; then
+          ARGS+=("--github-output" "${GITHUB_OUTPUT}")
+        fi
+
+        set +e
+        node "${ACTION_PATH}/packages/cicd-security/dist/cli.js" "${ARGS[@]}"
+        EXIT_CODE=$?
+        set -e
+
+        echo "scan-exit-code=${EXIT_CODE}" >> "${GITHUB_OUTPUT}"
+
+    - name: Upload SARIF to GitHub Code Scanning
+      if: ${{ always() && inputs.upload-sarif == 'true' && hashFiles(inputs.sarif-file) != '' }}
+      uses: github/codeql-action/upload-sarif@45775bd8235c68ba998cffa5171334d58593da47 # v3
+      with:
+        sarif_file: ${{ inputs.sarif-file }}
+        category: indicative-cicd-oidc
+
+    - name: Enforce Indicative policy exit code
+      shell: bash
+      env:
+        SCAN_EXIT_CODE: ${{ steps.scan.outputs.scan-exit-code }}
+      run: |
+        exit "${SCAN_EXIT_CODE:-0}"

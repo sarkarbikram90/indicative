@@ -1,0 +1,53 @@
+name: Reusable Indicative CI/CD & OIDC Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        description: "Directory to audit"
+        required: false
+        type: string
+        default: "."
+      policy:
+        description: "Policy mode (informational | warning | failure)"
+        required: false
+        type: string
+        default: "warning"
+      ignore:
+        description: "Comma-separated path prefixes to exclude"
+        required: false
+        type: string
+        default: ""
+      upload-sarif:
+        description: "Upload SARIF 2.1.0 results to GitHub Code Scanning"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  indicative-cicd-security:
+    name: Indicative CI/CD & OIDC Audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Run Indicative CI/CD & OIDC Security Action
+        uses: ./
+        with:
+          path: ${{ inputs.path }}
+          policy: ${{ inputs.policy }}
+          ignore: ${{ inputs.ignore }}
+          upload-sarif: ${{ inputs.upload-sarif }}
+          sarif-file: indicative-cicd.sarif
+          annotations: true
+          step-summary: true

@@ -21,6 +21,7 @@
 | Secret & Verification Integrity (`v0.1.0`) | Tenant-keyed `HKDF+HMAC-SHA256` fingerprinting, linear-time PEM scrubbing, chunked redaction, honest `NOT_VERIFIED` credential status & `VERIFICATION_INCONCLUSIVE` failure transparency | ✅ Verified |
 | Contextual Intelligence (`v0.2.0`) | Offline-capable CISA KEV + FIRST EPSS enrichment with explicit source/observation provenance and `[VERIFIED]` / `[INFERRED]` / `[UNKNOWN]` risk rationale | ✅ Verified |
 | CI/CD & OIDC Security (`v0.2.0`) | `@indicative/cicd-security` AST YAML GitHub Actions analyzer (16 versioned rules), static AWS/Azure/GCP OIDC trust correlation, standalone CLI, policy modes, `/api/v1/workflows`, and `/workflows` UI view | ✅ Verified |
+| Developer Workflow & Automation (`v0.2.0`) | HMAC-SHA256 GitHub Webhooks (`X-Hub-Signature-256`) with replay protection + automated PR comments & Check Runs, reusable composite GitHub Action (`action.yml`) with SARIF 2.1.0 Code Scanning upload, cron-scheduled recurring scans, encrypted Slack/Jira/GitHub Issue notifications, and `/automations` UI | ✅ Verified |
 | Audit Hardening & OSS Foundation (`v0.2.0`) | Writable-phase symlink sanitization, UUID validation, production CORS restriction, `security_policies` enforcement, `SECURITY.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`, dogfooded CI | ✅ Verified |
 
 ---
@@ -84,9 +85,19 @@ npm run scan:cicd -- . --format markdown
 # Inspect deliberately vulnerable CI/CD + OIDC fixture
 npm run scan:cicd -- tests/fixtures/cicd-vulnerable --format markdown
 
-# GitHub Actions annotations or strict CI policy gate
+# GitHub Actions annotations, SARIF 2.1.0, or strict CI policy gate
 npm run scan:cicd -- . --format annotations
+npm run scan:cicd -- . --format sarif --sarif-file indicative-cicd.sarif
 npm run scan:cicd -- . --format json --policy failure
+```
+
+### Reusable GitHub Action (3-Line Setup + SARIF Code Scanning Upload)
+
+```yaml
+- uses: sarkarbikram90/indicative@main
+  with:
+    policy: warning # informational | warning | failure
+    upload-sarif: true
 ```
 
 ### 2. Full Local Platform via Docker Compose

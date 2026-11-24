@@ -2,6 +2,7 @@ import { and, desc, eq, ne } from "drizzle-orm";
 import type { AppConfig } from "@indicative/config";
 import {
   DEFAULT_SCANNERS,
+  ScanTriggerMetadataSchema,
   type FindingStatus,
   type ScanStatus,
   type ScannerExecutionResult,
@@ -48,6 +49,8 @@ import {
 } from "@indicative/shared";
 import { GitHubAppClient } from "../ingestion/githubApp.js";
 import { ingestRepositoryForScan } from "../ingestion/repositoryIngestor.js";
+import { publishGitHubScanFeedback } from "../automation/githubFeedback.js";
+import { dispatchScanNotifications } from "../automation/notifications.js";
 
 export interface ScanProcessorDependencies {
   db: Database;
@@ -58,6 +61,7 @@ export interface ScanProcessorDependencies {
   githubAppClient?: GitHubAppClient;
   metrics?: MetricsRegistry;
   logger?: StructuredLogger;
+  fetchImpl?: typeof fetch;
 }
 
 async function invokeRemoteScannerRunner(params: {
@@ -783,6 +787,59 @@ export async function executeScanPipeline(
       peakHeapUsedMb
     });
 
+    // 7. BEST-EFFORT DEVELOPER WORKFLOW FEEDBACK (GitHub Check Runs / PR Comments & Notifications)
+    const parsedTriggerMeta = ScanTriggerMetadataSchema.safeParse(scanRow.triggerMetadata ?? {});
+    const triggerMeta = parsedTriggerMeta.success ? parsedTriggerMeta.data : {};
+    const effectiveInstallationId =
+      triggerMeta.githubInstallationId ?? ghInstallationNumber;
+
+    if (
+      (scanRow.triggerSource === "WEBHOOK_PR" || scanRow.triggerSource === "WEBHOOK_PUSH") &&
+      deps.githubAppClient &&
+      effectiveInstallationId
+    ) {
+      await publishGitHubScanFeedback({
+        ctx: {
+          webPublicUrl: deps.config.WEB_PUBLIC_URL,
+          scanId,
+          repositoryFullName: repoRow.fullName,
+          branch: ingested.branch,
+          commitSha: ingested.commitSha,
+          status: finalStatus,
+          findings: persistedFindingsForReport,
+          comparison: comparisonPlan.comparison,
+          limitations: allLimitations,
+          triggerMetadata: {
+            ...triggerMeta,
+            githubInstallationId: effectiveInstallationId
+          }
+        },
+        githubAppClient: deps.githubAppClient,
+        postPrComments: deps.config.GITHUB_WEBHOOK_POST_PR_COMMENTS,
+        createCheckRuns: deps.config.GITHUB_WEBHOOK_CREATE_CHECK_RUNS,
+        logger: log
+      });
+    }
+
+    await dispatchScanNotifications({
+      db: deps.db,
+      config: deps.config,
+      organizationId: scanRow.organizationId,
+      projectId: scanRow.projectId,
+      projectName: projectRow.name,
+      repositoryFullName: repoRow.fullName,
+      scanId,
+      branch: ingested.branch,
+      commitSha: ingested.commitSha,
+      status: finalStatus,
+      findings: persistedFindingsForReport,
+      comparison: comparisonPlan.comparison,
+      githubInstallationId: effectiveInstallationId,
+      githubAppClient: deps.githubAppClient,
+      fetchImpl: deps.fetchImpl,
+      logger: log
+    });
+
     return {
       scanId,
       status: finalStatus,
@@ -803,6 +860,27 @@ export async function executeScanPipeline(
         updatedAt: new Date()
       })
       .where(eq(scans.id, scanId));
+
+    // Best-effort failure notifications
+    await dispatchScanNotifications({
+      db: deps.db,
+      config: deps.config,
+      organizationId: scanRow.organizationId,
+      projectId: scanRow.projectId,
+      projectName: projectRow.name,
+      repositoryFullName: repoRow.fullName,
+      scanId,
+      branch: scanRow.branch || repoRow.defaultBranch,
+      commitSha: scanRow.commitSha,
+      status: "FAILED",
+      findings: [],
+      failureReason: errMessage,
+      githubAppClient: deps.githubAppClient,
+      fetchImpl: deps.fetchImpl,
+      logger: log
+    }).catch(() => {
+      // Never mask original scan error
+    });
 
     return { scanId, status: "FAILED", findingsCount: 0 };
   } finally {

@@ -24,6 +24,8 @@ import {
 import { createAuthMiddleware } from "./middleware/auth.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerPlatformRoutes } from "./routes/platform.js";
+import { registerWebhookRoutes } from "./routes/webhooks.js";
+import { registerAutomationRoutes } from "./routes/automation.js";
 
 export interface BuildApiServerOptions {
   config: AppConfig;
@@ -195,6 +197,23 @@ export async function buildApiServer(
     aiAnalyst: options.aiAnalyst,
     githubAppClient: options.githubAppClient,
     requireAuth
+  });
+
+  registerWebhookRoutes(app, {
+    db: dbConn.db,
+    config,
+    enqueuer: options.enqueuer,
+    githubAppClient: options.githubAppClient,
+    logger
+  });
+
+  registerAutomationRoutes(app, {
+    db: dbConn.db,
+    config,
+    enqueuer: options.enqueuer,
+    githubAppClient: options.githubAppClient,
+    requireAuth,
+    fetchImpl: options.fetchImpl
   });
 
   return app;

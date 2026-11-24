@@ -207,6 +207,7 @@ export const scans = pgTable(
     }),
     idempotencyKey: text("idempotency_key"),
     triggerSource: text("trigger_source").notNull().default("MANUAL"),
+    triggerMetadata: jsonb("trigger_metadata").$type<Record<string, unknown>>().notNull().default({}),
     branch: text("branch").notNull().default("main"),
     commitSha: text("commit_sha"),
     commitMessage: text("commit_message"),
@@ -522,4 +523,122 @@ export const securityPolicies = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [uniqueIndex("security_policies_org_idx").on(table.organizationId)]
+);
+
+// ============================================================================
+// 6. Developer Workflow & Automation (Webhooks, Schedules, Notifications)
+// ============================================================================
+
+export const webhookDeliveries = pgTable(
+  "webhook_deliveries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    deliveryId: text("delivery_id").notNull(),
+    provider: text("provider").notNull().default("GITHUB"),
+    eventType: text("event_type").notNull(),
+    action: text("action"),
+    repositoryFullName: text("repository_full_name"),
+    organizationId: uuid("organization_id").references(() => organizations.id, {
+      onDelete: "set null"
+    }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+    scanId: uuid("scan_id").references(() => scans.id, { onDelete: "set null" }),
+    signatureValid: boolean("signature_valid").notNull().default(false),
+    status: text("status").notNull(), // ACCEPTED | IGNORED | REJECTED | DUPLICATE
+    summary: text("summary"),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("webhook_deliveries_provider_delivery_idx").on(table.provider, table.deliveryId),
+    index("webhook_deliveries_org_received_idx").on(table.organizationId, table.receivedAt)
+  ]
+);
+
+export const scanSchedules = pgTable(
+  "scan_schedules",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    cadence: text("cadence").notNull().default("DAILY"), // HOURLY | DAILY | WEEKLY | CUSTOM_CRON
+    cronExpression: text("cron_expression").notNull(),
+    branch: text("branch"),
+    scanners: jsonb("scanners")
+      .$type<string[]>()
+      .notNull()
+      .default(["semgrep", "trivy", "gitleaks", "cicd-github-actions"]),
+    runAiAnalysis: boolean("run_ai_analysis").notNull().default(false),
+    enabled: boolean("enabled").notNull().default(true),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
+    lastScanId: uuid("last_scan_id").references(() => scans.id, { onDelete: "set null" }),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null"
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    index("scan_schedules_org_idx").on(table.organizationId),
+    index("scan_schedules_enabled_next_run_idx").on(table.enabled, table.nextRunAt)
+  ]
+);
+
+export const notificationChannels = pgTable(
+  "notification_channels",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    channelType: text("channel_type").notNull(), // SLACK | JIRA | GITHUB_ISSUE
+    enabled: boolean("enabled").notNull().default(true),
+    events: jsonb("events")
+      .$type<string[]>()
+      .notNull()
+      .default(["NEW_CRITICAL_OR_HIGH", "KEV_DETECTED", "SCAN_FAILED"]),
+    minSeverity: text("min_severity").notNull().default("HIGH"),
+    onlyOnNewFindings: boolean("only_on_new_findings").notNull().default(true),
+    configJson: jsonb("config_json").$type<Record<string, unknown>>().notNull().default({}),
+    encryptedCredentials: text("encrypted_credentials"),
+    lastTriggeredAt: timestamp("last_triggered_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    index("notification_channels_org_idx").on(table.organizationId),
+    index("notification_channels_project_idx").on(table.projectId)
+  ]
+);
+
+export const notificationDeliveries = pgTable(
+  "notification_deliveries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    channelId: uuid("channel_id")
+      .notNull()
+      .references(() => notificationChannels.id, { onDelete: "cascade" }),
+    scanId: uuid("scan_id").references(() => scans.id, { onDelete: "set null" }),
+    eventType: text("event_type").notNull(),
+    status: text("status").notNull(), // SENT | FAILED | SKIPPED
+    httpStatus: integer("http_status"),
+    externalRef: text("external_ref"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    index("notification_deliveries_org_created_idx").on(table.organizationId, table.createdAt),
+    index("notification_deliveries_channel_idx").on(table.channelId)
+  ]
 );

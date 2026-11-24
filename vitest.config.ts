@@ -26,7 +26,8 @@ export default defineConfig({
       "@indicative/cicd-security": path.resolve(__dirname, "packages/cicd-security/src/index.ts"),
       "@indicative/findings": path.resolve(__dirname, "packages/findings/src/index.ts"),
       "@indicative/ai": path.resolve(__dirname, "packages/ai/src/index.ts"),
-      "@indicative/scanner-runner": path.resolve(__dirname, "services/scanner-runner/src/index.ts")
+      "@indicative/scanner-runner": path.resolve(__dirname, "services/scanner-runner/src/index.ts"),
+      "@indicative/worker": path.resolve(__dirname, "apps/worker/src/index.ts")
     }
   }
 });

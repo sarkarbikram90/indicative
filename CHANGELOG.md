@@ -15,6 +15,11 @@ All notable changes to **Indicative** are documented in this file. The format is
   - Offline-capable Vulnerability Intelligence enrichment (`packages/findings/src/intelligence.ts`) supporting CISA KEV and FIRST EPSS snapshots with source provenance, observation timestamps, and non-blocking failure isolation.
   - Upgraded contextual risk prioritization explicitly distinguishing `[VERIFIED]`, `[INFERRED]`, and `[UNKNOWN]` signals while preserving original scanner severity.
   - Trivy offline vulnerability DB freshness inspection (`db/metadata.json`) emitting `TRIVY_DB_STALE` limitations when stale.
+- **Developer Workflow & Automation:**
+  - Verified GitHub App Webhook receiver (`POST /api/v1/webhooks/github`) enforcing constant-time `X-Hub-Signature-256` verification over raw request bytes, durable `X-GitHub-Delivery` replay deduplication (`webhook_deliveries`), automated `push` & `pull_request` scans, GitHub Check Runs with inline annotations, and sticky Markdown PR summary comments (`<!-- indicative-security-summary -->`).
+  - Reusable composite GitHub Action (`action.yml`) and reusable workflow (`.github/workflows/reusable-cicd-scan.yml`) with SHA-pinned steps, `env:`-isolated inputs, SARIF 2.1.0 Code Scanning upload (`formatCicdReportAsSarif` + `--sarif-file`), and GitHub Job Summaries.
+  - Scheduled/recurring scans (`scan_schedules` table, deterministic 5-field UTC cron engine, worker poller, and `/api/v1/schedules` CRUD + manual trigger API).
+  - Encrypted-at-rest (`HKDF-SHA256` + `AES-256-GCM`) notification channels (`notification_channels` & `notification_deliveries`) supporting Slack Incoming Webhooks, Jira Cloud REST v3 Issues, and GitHub Issues with strict SSRF validation, fail-closed secret redaction, `/api/v1/notifications/*` APIs, and the `/automations` Next.js UI page.
 - **Audit, Architecture & Open-Source Community Foundation:**
   - `docs/audits/current-state-assessment.md`, `docs/product/competitive-landscape.md`, `docs/product/product-roadmap.md`, `docs/architecture/ci-cd-security-architecture.md`, `docs/architecture/ci-cd-security-threat-model.md`, `rules/cicd/github-actions/README.md`, `docs/community/README.md`.
   - `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `GOVERNANCE.md`, `ROADMAP.md`, `SUPPORT.md`, GitHub issue/PR templates, and dogfooded `.github/workflows/ci.yml`.

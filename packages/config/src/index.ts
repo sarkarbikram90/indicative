@@ -58,6 +58,12 @@ const envSchema = z.object({
   GITHUB_APP_SLUG: z.string().default("indicative-security"),
   GITHUB_APP_PRIVATE_KEY: z.string().default(""),
   GITHUB_APP_WEBHOOK_SECRET: z.string().default(""),
+  GITHUB_WEBHOOK_POST_PR_COMMENTS: booleanFromEnv.default(true),
+  GITHUB_WEBHOOK_CREATE_CHECK_RUNS: booleanFromEnv.default(true),
+
+  ENABLE_SCHEDULER: booleanFromEnv.default(true),
+  SCHEDULER_POLL_INTERVAL_MS: z.coerce.number().int().min(5000).max(3600000).default(60000),
+  NOTIFICATION_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60000).default(10000),
 
   SCANNER_RUNNER_MODE: z.enum(["http", "local"]).default("local"),
   SCANNER_SANDBOX_RUNTIME: z
@@ -147,4 +153,8 @@ export function isGitHubAppConfigured(config: AppConfig): boolean {
   return (
     config.GITHUB_APP_ID.trim().length > 0 && config.GITHUB_APP_PRIVATE_KEY.trim().length > 0
   );
+}
+
+export function isGitHubWebhookConfigured(config: AppConfig): boolean {
+  return config.GITHUB_APP_WEBHOOK_SECRET.trim().length >= 16;
 }

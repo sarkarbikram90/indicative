@@ -9,6 +9,7 @@ import {
   FolderGit2,
   AlertTriangle,
   Workflow,
+  BellRing,
   Bot,
   LogOut,
   FileCode2
@@ -20,6 +21,7 @@ const NAV_ITEMS = [
   { href: "/projects", label: "Projects", icon: FolderGit2 },
   { href: "/findings", label: "Findings", icon: AlertTriangle },
   { href: "/workflows", label: "CI/CD & OIDC", icon: Workflow },
+  { href: "/automations", label: "Automations", icon: BellRing },
   { href: "/advisor", label: "AI Advisor", icon: Bot }
 ];
 

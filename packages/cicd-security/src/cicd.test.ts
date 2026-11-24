@@ -174,6 +174,44 @@ describe("@indicative/cicd-security", () => {
       expect(md).toContain("Indicative CI/CD & OIDC Security Summary");
       expect(md).toContain("STATIC_CONFIG");
       expect(md).not.toContain(dummyPat);
+
+      // SARIF 2.1.0 output must be valid, include rules + results, and never leak plaintext secrets
+      const { formatCicdReportAsSarif } = await import("./policy.js");
+      const sarifRaw = formatCicdReportAsSarif(report);
+      expect(sarifRaw).not.toContain(dummyPat);
+      const sarif = JSON.parse(sarifRaw) as {
+        version: string;
+        runs: Array<{
+          tool: { driver: { rules: Array<{ id: string }> } };
+          results: Array<{ ruleId: string; partialFingerprints: { primaryLocationLineHash: string } }>;
+        }>;
+      };
+      expect(sarif.version).toBe("2.1.0");
+      expect(sarif.runs[0]!.tool.driver.rules.length).toBeGreaterThan(0);
+      expect(sarif.runs[0]!.results.length).toBe(report.findings.length);
+      expect(sarif.runs[0]!.results[0]!.partialFingerprints.primaryLocationLineHash).toMatch(/^[0-9a-f]{64}$/);
+
+      // CLI helper writes SARIF, summary, and GitHub outputs cleanly
+      const { runCicdCli } = await import("./cli.js");
+      const sarifOut = path.join(tmpDir, "out.sarif");
+      const summaryOut = path.join(tmpDir, "summary.md");
+      const ghOut = path.join(tmpDir, "gh-output.txt");
+      const code = await runCicdCli({
+        targetPath: tmpDir,
+        format: "markdown",
+        policyMode: "failure",
+        ignorePaths: [],
+        outputFile: path.join(tmpDir, "report.md"),
+        sarifFile: sarifOut,
+        summaryFile: summaryOut,
+        githubOutputFile: ghOut
+      });
+      expect(code).toBe(1);
+      const writtenSarif = JSON.parse(await fs.readFile(sarifOut, "utf8")) as { version: string };
+      expect(writtenSarif.version).toBe("2.1.0");
+      const writtenGhOut = await fs.readFile(ghOut, "utf8");
+      expect(writtenGhOut).toContain("policy-passed=false");
+      expect(writtenGhOut).toContain(`findings-count=${report.findings.length}`);
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }

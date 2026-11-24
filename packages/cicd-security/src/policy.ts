@@ -1,5 +1,9 @@
+import crypto from "node:crypto";
 import type { FindingSeverity, RawScannerFinding } from "@indicative/contracts";
-import { redactSecretsInText } from "@indicative/security";
+import {
+  containsPotentialPlaintextSecret,
+  redactSecretsInText
+} from "@indicative/security";
 import type {
   CicdAnalysisReport,
   CicdPolicyConfig,
@@ -146,4 +150,143 @@ export function formatPullRequestMarkdownSummary(report: CicdAnalysisReport): st
     "> **Evidence Boundary:** All findings reflect deterministic static configuration analysis (`STATIC_CONFIG`). Live cloud IAM permissions, SCPs, and GitHub repository settings are not verified statically."
   );
   return lines.join("\n");
+}
+
+function mapSeverityToSarifLevel(severity: FindingSeverity): "error" | "warning" | "note" {
+  if (severity === "CRITICAL" || severity === "HIGH") return "error";
+  if (severity === "MEDIUM") return "warning";
+  return "note";
+}
+
+function mapSeverityToSecuritySeverityScore(severity: FindingSeverity): string {
+  switch (severity) {
+    case "CRITICAL":
+      return "9.5";
+    case "HIGH":
+      return "7.8";
+    case "MEDIUM":
+      return "5.5";
+    case "LOW":
+      return "3.0";
+    default:
+      return "1.0";
+  }
+}
+
+/**
+ * Formats a CI/CD & OIDC analysis report as GitHub Code Scanning compatible SARIF 2.1.0.
+ * Enforces fail-closed plaintext secret redaction before returning serialized output.
+ */
+export function formatCicdReportAsSarif(report: CicdAnalysisReport): string {
+  const rulesById = new Map<string, Record<string, unknown>>();
+  for (const f of report.findings) {
+    if (!rulesById.has(f.ruleId)) {
+      rulesById.set(f.ruleId, {
+        id: f.ruleId,
+        name: f.ruleId,
+        shortDescription: { text: redactSecretsInText(f.title) },
+        fullDescription: { text: redactSecretsInText(f.description) },
+        help: {
+          text: redactSecretsInText(
+            f.remediationHint ??
+              "Review this workflow or cloud OIDC trust policy and apply least-privilege controls."
+          )
+        },
+        helpUri: "https://github.com/sarkarbikram90/indicative/tree/main/rules/cicd/github-actions",
+        defaultConfiguration: {
+          level: mapSeverityToSarifLevel(f.severity)
+        },
+        properties: {
+          tags: ["security", "ci-cd", "github-actions", "oidc"],
+          precision: f.confidence === "HIGH" ? "very-high" : f.confidence === "MEDIUM" ? "high" : "medium",
+          "security-severity": mapSeverityToSecuritySeverityScore(f.severity)
+        }
+      });
+    }
+  }
+
+  const results = report.findings.map((f) => {
+    const normalizedPath = f.filePath ? f.filePath.replace(/\\/g, "/").replace(/^\.\//, "") : undefined;
+    const fingerprint = crypto
+      .createHash("sha256")
+      .update(`${f.ruleId}|${normalizedPath ?? ""}|${f.lineStart ?? 0}|${f.title}`)
+      .digest("hex");
+
+    return {
+      ruleId: f.ruleId,
+      level: mapSeverityToSarifLevel(f.severity),
+      message: {
+        text: redactSecretsInText(
+          `${f.title} — ${f.description}${f.remediationHint ? ` Remediation: ${f.remediationHint}` : ""}`
+        )
+      },
+      partialFingerprints: {
+        primaryLocationLineHash: fingerprint
+      },
+      locations: normalizedPath
+        ? [
+            {
+              physicalLocation: {
+                artifactLocation: { uri: normalizedPath },
+                ...(f.lineStart
+                  ? {
+                      region: {
+                        startLine: f.lineStart,
+                        ...(f.lineEnd && f.lineEnd >= f.lineStart ? { endLine: f.lineEnd } : {})
+                      }
+                    }
+                  : {})
+              }
+            }
+          ]
+        : [],
+      properties: {
+        scanner: report.scanner,
+        scannerVersion: report.scannerVersion,
+        rulesetVersion: report.rulesetVersion,
+        severity: f.severity,
+        confidence: f.confidence,
+        category: f.category,
+        evidenceBasis: "STATIC_CONFIG"
+      }
+    };
+  });
+
+  const sarif = {
+    $schema: "https://json.schemastore.org/sarif-2.1.0.json",
+    version: "2.1.0",
+    runs: [
+      {
+        tool: {
+          driver: {
+            name: "Indicative CI/CD & OIDC Security",
+            version: report.scannerVersion,
+            semanticVersion: report.scannerVersion,
+            informationUri: "https://github.com/sarkarbikram90/indicative",
+            rules: [...rulesById.values()]
+          }
+        },
+        invocations: [
+          {
+            executionSuccessful: true,
+            properties: {
+              rulesetVersion: report.rulesetVersion,
+              workflowsScanned: report.workflows.length,
+              oidcPoliciesScanned: report.oidcTrustPolicies.length,
+              policyMode: report.policyEvaluation.mode,
+              policyPassed: report.policyEvaluation.passed,
+              limitations: report.limitations
+            }
+          }
+        ],
+        results
+      }
+    ]
+  };
+
+  const serialized = JSON.stringify(sarif, null, 2);
+  if (containsPotentialPlaintextSecret(serialized)) {
+    throw new Error("SECURITY_VIOLATION: Exported CI/CD SARIF failed plaintext secret redaction check.");
+  }
+  return serialized;
 }

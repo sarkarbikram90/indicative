@@ -40,4 +40,4 @@ jobs:
         run: npx vitest run packages/ai packages/cicd-security packages/findings packages/security tests/integration tests/security tests/regression/cicd-corpus-benchmark.test.ts
 
       - name: Dogfood Indicative CI/CD & OIDC Security Analyzer against this repository
-        run: npm run scan:cicd -- . --ignore tests/fixtures --format markdown --policy failure
+        run: npm run scan:cicd -- . --ignore tests/fixtures --format markdown --sarif-file .indicative-ci.sarif --policy failure

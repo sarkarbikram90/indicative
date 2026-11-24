@@ -18,7 +18,14 @@ export const ScanStatusSchema = z.enum([
 ]);
 export type ScanStatus = z.infer<typeof ScanStatusSchema>;
 
-export const ScanTriggerSourceSchema = z.enum(["MANUAL", "API", "DEMO"]);
+export const ScanTriggerSourceSchema = z.enum([
+  "MANUAL",
+  "API",
+  "DEMO",
+  "WEBHOOK_PUSH",
+  "WEBHOOK_PR",
+  "SCHEDULED"
+]);
 export type ScanTriggerSource = z.infer<typeof ScanTriggerSourceSchema>;
 
 export const ScanSummaryCountsSchema = z.object({
