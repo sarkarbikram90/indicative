@@ -79,6 +79,24 @@ export function computeCanonicalFingerprint(
       ])}`;
     }
 
+    case "CICD": {
+      const workflowAnchor =
+        typeof finding.rawMetadata?.workflowAnchor === "string"
+          ? finding.rawMetadata.workflowAnchor
+          : typeof finding.rawMetadata?.jobId === "string"
+            ? `${finding.rawMetadata.jobId}:${finding.rawMetadata.stepName ?? finding.lineStart ?? 0}`
+            : normalizeCodeAnchor(finding.codeSnippet) || String(finding.lineStart ?? 0);
+      return `fp:cicd:${sha256([
+        "v1",
+        "CICD",
+        projectId,
+        finding.scanner,
+        finding.ruleId,
+        file,
+        workflowAnchor
+      ])}`;
+    }
+
     case "SAST":
     default: {
       const anchor = normalizeCodeAnchor(finding.codeSnippet) || String(finding.lineStart ?? 0);

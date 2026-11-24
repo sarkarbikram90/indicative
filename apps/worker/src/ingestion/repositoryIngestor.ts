@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { safeSpawnBinary } from "@indicative/scanners";
 import {
   safeRemoveEphemeralDir,
+  sanitizeUntrustedWorkspace,
   validateGitHubRepositorySlug,
   validateSafePathWithinRoot
 } from "@indicative/security";
@@ -190,6 +191,13 @@ export async function ingestRepositoryForScan(
         );
       }
     }
+
+    // Pre-sanitize escaping/broken symlinks while the workspace is still writable,
+    // prior to handing off to a read-only scanner-runner mount (:ro).
+    await sanitizeUntrustedWorkspace(workspacePath, {
+      maxBytes: Number.MAX_SAFE_INTEGER,
+      maxFiles: Number.MAX_SAFE_INTEGER
+    });
 
     const gitMeta = await readGitHeadMetadata(workspacePath);
 

@@ -266,4 +266,62 @@ describe("@indicative/findings", () => {
     expect(streamedCsv).toContain("CVE-2020-8203");
     expect(streamedCsv).toContain("lodash");
   });
+
+  it("enriches SCA findings with offline CISA KEV / EPSS intelligence and stabilizes CICD fingerprints across line shifts", () => {
+    const kevNormalized = normalizeAndDeduplicateFindings({
+      organizationId: "org-1",
+      projectId: "proj-1",
+      scanId: "scan-1",
+      rawFindings: [
+        {
+          scanner: "trivy",
+          scannerVersion: "0.76.2",
+          ruleId: "CVE-2021-44228",
+          category: "SCA",
+          title: "Log4Shell RCE",
+          description: "Remote code execution in log4j-core",
+          severity: "HIGH",
+          originalSeverity: "HIGH",
+          confidence: "HIGH",
+          filePath: "pom.xml",
+          packageName: "log4j-core",
+          installedVersion: "2.14.1",
+          fixedVersion: "2.17.1",
+          cve: "CVE-2021-44228",
+          cvssScore: 10.0,
+          references: []
+        }
+      ]
+    });
+
+    const f = kevNormalized[0]!.finding;
+    // Original severity is preserved, while CISA KEV elevates risk priority to IMMEDIATE with explicit provenance
+    expect(f.severity).toBe("HIGH");
+    expect(f.originalSeverity).toBe("HIGH");
+    expect(f.intelligence?.kevListed).toBe(true);
+    expect(f.riskPriority).toBe("IMMEDIATE");
+    expect(f.riskRationale.some((r) => r.includes("CISA Known Exploited Vulnerabilities"))).toBe(true);
+    expect(f.riskRationale.some((r) => r.includes("[UNKNOWN]"))).toBe(true);
+
+    // CICD fingerprint uses workflowAnchor so adding comments/lines above does not break dedupe
+    const cicdLine10: RawScannerFinding = {
+      scanner: "cicd-github-actions",
+      scannerVersion: "1.0.0",
+      ruleId: "GHA-INJ-001",
+      category: "CICD",
+      title: "Injection",
+      description: "Untrusted PR title in run:",
+      severity: "CRITICAL",
+      confidence: "HIGH",
+      filePath: ".github/workflows/pr.yml",
+      lineStart: 10,
+      rawMetadata: { workflowAnchor: "job:review:expr-injection:github.event.pull_request.title" },
+      references: []
+    };
+    const cicdLine25: RawScannerFinding = { ...cicdLine10, lineStart: 25 };
+
+    expect(computeCanonicalFingerprint("proj-1", cicdLine10)).toBe(
+      computeCanonicalFingerprint("proj-1", cicdLine25)
+    );
+  });
 });

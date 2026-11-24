@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   FolderGit2,
   AlertTriangle,
+  Workflow,
   Bot,
   LogOut,
   FileCode2
@@ -18,6 +19,7 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/projects", label: "Projects", icon: FolderGit2 },
   { href: "/findings", label: "Findings", icon: AlertTriangle },
+  { href: "/workflows", label: "CI/CD & OIDC", icon: Workflow },
   { href: "/advisor", label: "AI Advisor", icon: Bot }
 ];
 
@@ -80,7 +82,7 @@ export function AppShell({
                   Indicative
                 </div>
                 <div className="text-[11px] text-slate-400">
-                  Security Intelligence MVP
+                  Security Intelligence
                 </div>
               </div>
             </Link>

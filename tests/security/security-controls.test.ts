@@ -282,4 +282,41 @@ describe("Security Controls: Tenant Isolation, Auth/CSRF, Production Guardrails 
     expect(gvisorArgs).toContain("--security-opt=seccomp=/etc/indicative/seccomp-scanner.json");
     expect(gvisorArgs.join(" ")).not.toContain("docker.sock");
   });
+
+  it("rejects malformed UUID path parameters with HTTP 400 and confines localFixturePath to approved roots", async () => {
+    const badProjectId = await api.inject({
+      method: "GET",
+      url: "/api/v1/projects/not-a-valid-uuid",
+      headers: { Authorization: `Bearer ${orgAToken}` }
+    });
+    expect(badProjectId.statusCode).toBe(400);
+
+    const badFindingId = await api.inject({
+      method: "GET",
+      url: "/api/v1/findings/not-a-valid-uuid",
+      headers: { Authorization: `Bearer ${orgAToken}` }
+    });
+    expect(badFindingId.statusCode).toBe(400);
+
+    const escapingFixture = await api.inject({
+      method: "POST",
+      url: "/api/v1/projects",
+      headers: { Authorization: `Bearer ${orgAToken}` },
+      payload: {
+        name: "Escaping Fixture",
+        repositoryFullName: "org-a/escape-fixture",
+        localFixturePath: path.resolve(process.cwd(), "packages")
+      }
+    });
+    expect(escapingFixture.statusCode).toBe(403);
+
+    // Workflows endpoint enforces tenant isolation and returns honest STATIC_CONFIG evidence basis
+    const wfResp = await api.inject({
+      method: "GET",
+      url: "/api/v1/workflows",
+      headers: { Authorization: `Bearer ${orgBToken}` }
+    });
+    expect(wfResp.statusCode).toBe(200);
+    expect(wfResp.json().evidenceBasis).toBe("STATIC_CONFIG");
+  });
 });

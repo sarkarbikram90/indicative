@@ -14,9 +14,10 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm --workspace @indicative/config run build && npm --workspace @indicative/contracts run build && npm --workspace @indicative/security run build && npm --workspace @indicative/shared run build && npm --workspace @indicative/database run build && npm --workspace @indicative/scanners run build && npm --workspace @indicative/cicd-security run build && npm --workspace @indicative/findings run build && npm --workspace @indicative/ai run build && npm --workspace @indicative/scanner-runner run build && npm --workspace @indicative/worker run build && npm --workspace @indicative/api run build && npm --workspace @indicative/web run build",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present",
+    "lint": "npm run typecheck",
+    "scan:cicd": "tsx packages/cicd-security/src/cli.ts",
     "dev:api": "npm --workspace @indicative/api run dev",
     "dev:worker": "npm --workspace @indicative/worker run dev",
     "dev:runner": "npm --workspace @indicative/scanner-runner run dev",

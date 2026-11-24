@@ -211,7 +211,10 @@ export const scans = pgTable(
     commitSha: text("commit_sha"),
     commitMessage: text("commit_message"),
     status: text("status").notNull().default("QUEUED"),
-    requestedScanners: jsonb("requested_scanners").$type<string[]>().notNull().default(["semgrep", "trivy", "gitleaks"]),
+    requestedScanners: jsonb("requested_scanners")
+      .$type<string[]>()
+      .notNull()
+      .default(["semgrep", "trivy", "gitleaks", "cicd-github-actions"]),
     runAiAnalysis: boolean("run_ai_analysis").notNull().default(false),
     isDemoScan: boolean("is_demo_scan").notNull().default(false),
     summaryCounts: jsonb("summary_counts").$type<Record<string, number>>().notNull().default({}),

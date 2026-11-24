@@ -1,0 +1,23 @@
+name: Feature Proposal
+description: Propose a new security intelligence capability or integration
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: Who experiences this problem, how often, what is the current workaround, and what security or operational impact does it cause?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution & Evidence Model
+      description: Describe the proposed capability, what evidence is verified vs. unknown, and any security/isolation implications.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Existing Tools & Alternatives Considered
+      description: How do existing open-source or commercial tools handle this today?

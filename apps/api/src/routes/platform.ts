@@ -1,3 +1,5 @@
+import os from "node:os";
+import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import { and, desc, eq, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import type { AppConfig } from "@indicative/config";
@@ -5,6 +7,7 @@ import {
   AiAdvisorQuestionRequestSchema,
   CreateProjectRequestSchema,
   CreateScanRequestSchema,
+  DEFAULT_SCANNERS,
   FindingsFilterQuerySchema,
   FindingStatusTransitionRequestSchema,
   RegisterGitHubInstallationSchema,
@@ -30,8 +33,10 @@ import {
   projectRepositories,
   projects,
   scanArtifacts,
+  scannerMetadata,
   scannerRuns,
   scans,
+  securityPolicies,
   type Database
 } from "@indicative/database";
 import {
@@ -43,7 +48,10 @@ import {
 } from "@indicative/findings";
 import type { AiSecurityAnalyst } from "@indicative/ai";
 import type { GitHubAppClient, ScanJobEnqueuer } from "@indicative/worker";
-import { validateGitHubRepositorySlug } from "@indicative/security";
+import {
+  validateGitHubRepositorySlug,
+  validateSafePathWithinRoot
+} from "@indicative/security";
 import {
   ConflictError,
   ForbiddenError,
@@ -60,6 +68,34 @@ export interface PlatformRouteDeps {
   aiAnalyst: AiSecurityAnalyst;
   githubAppClient?: GitHubAppClient;
   requireAuth: (req: any, reply: any) => Promise<void>;
+}
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function assertUuidParam(value: string, label: string): string {
+  if (!UUID_REGEX.test(value)) {
+    throw new ValidationError(`Invalid ${label} identifier format (expected UUID).`);
+  }
+  return value;
+}
+
+function validateAllowedFixturePath(rawPath: string): string {
+  const resolved = path.resolve(rawPath);
+  const allowedRoots = [
+    path.resolve(process.cwd(), "tests/fixtures"),
+    path.resolve(os.tmpdir())
+  ];
+  for (const root of allowedRoots) {
+    try {
+      return validateSafePathWithinRoot(root, resolved);
+    } catch {
+      // try next approved root
+    }
+  }
+  throw new ForbiddenError(
+    "localFixturePath must reside inside the approved fixtures directory or temporary test directory."
+  );
 }
 
 function slugify(input: string): string {
@@ -182,8 +218,15 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
         f.verificationState === "NOT_DETECTED_IN_LATEST_SCAN" ||
         f.verificationState === "VERIFICATION_SUCCESSFUL_WITHIN_SCANNED_SCOPE"
     );
+    const inconclusiveFindings = orgFindings.filter(
+      (f) => f.verificationState === "VERIFICATION_INCONCLUSIVE"
+    );
 
-    const scannedRepoIds = new Set(recentScans.map((s) => s.projectId));
+    const allScannedProjects = await deps.db
+      .select({ projectId: scans.projectId })
+      .from(scans)
+      .where(eq(scans.organizationId, auth.organizationId));
+    const scannedRepoIds = new Set(allScannedProjects.map((s) => s.projectId));
 
     const severityBreakdown = {
       critical: openFindings.filter((f) => f.severity === "CRITICAL").length,
@@ -198,8 +241,11 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
       SAST: openFindings.filter((f) => f.category === "SAST").length,
       SCA: openFindings.filter((f) => f.category === "SCA").length,
       SECRET: openFindings.filter((f) => f.category === "SECRET").length,
-      IAC: openFindings.filter((f) => f.category === "IAC").length
+      IAC: openFindings.filter((f) => f.category === "IAC").length,
+      CICD: openFindings.filter((f) => f.category === "CICD").length
     };
+
+    const scanners = await deps.db.select().from(scannerMetadata);
 
     const securityTrends = recentScans
       .slice()
@@ -222,9 +268,11 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
         repositoriesScanned: scannedRepoIds.size,
         openFindings: openFindings.length,
         resolvedOrNotDetected: resolvedFindings.length,
+        inconclusiveVerification: inconclusiveFindings.length,
         ...severityBreakdown
       },
       categoryBreakdown,
+      scanners,
       recentScans,
       securityTrends,
       recentActivity
@@ -382,10 +430,14 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
     const slug = validateGitHubRepositorySlug(parsed.data.repositoryFullName);
     const projectSlug = slugify(parsed.data.name);
 
-    // Local fixture projects are strictly restricted to non-production DEMO_MODE
+    // Local fixture projects are strictly restricted to non-production DEMO_MODE and approved roots
     const isLocalFixture = Boolean(parsed.data.localFixturePath);
-    if (isLocalFixture && (deps.config.NODE_ENV === "production" || !deps.config.DEMO_MODE)) {
-      throw new ForbiddenError("Local fixture repositories are only allowed in development demo mode.");
+    let safeFixturePath: string | null = null;
+    if (isLocalFixture) {
+      if (deps.config.NODE_ENV === "production" || !deps.config.DEMO_MODE) {
+        throw new ForbiddenError("Local fixture repositories are only allowed in development demo mode.");
+      }
+      safeFixturePath = validateAllowedFixturePath(parsed.data.localFixturePath!);
     }
 
     if (parsed.data.githubInstallationId) {
@@ -434,7 +486,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
         fullName: slug.fullName,
         defaultBranch: parsed.data.defaultBranch,
         isPrivate: parsed.data.isPrivate,
-        localFixturePath: parsed.data.localFixturePath ?? null
+        localFixturePath: safeFixturePath
       })
       .returning();
 
@@ -518,7 +570,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
 
   app.get("/api/v1/projects/:projectId", { preHandler: [deps.requireAuth] }, async (request) => {
     const auth = request.auth as AuthContext;
-    const { projectId } = request.params as { projectId: string };
+    const projectId = assertUuidParam((request.params as { projectId: string }).projectId, "projectId");
 
     const [project] = await deps.db
       .select()
@@ -558,7 +610,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
     { preHandler: [deps.requireAuth] },
     async (request, reply) => {
       const auth = request.auth as AuthContext;
-      const { projectId } = request.params as { projectId: string };
+      const projectId = assertUuidParam((request.params as { projectId: string }).projectId, "projectId");
 
       const parsed = CreateScanRequestSchema.safeParse(request.body ?? {});
       if (!parsed.success) {
@@ -608,7 +660,16 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
         }
       }
 
-      // Enforce per-organization active concurrent scan limit
+      // Enforce per-organization active concurrent scan limit (honoring security_policies when present)
+      const [orgPolicy] = await deps.db
+        .select()
+        .from(securityPolicies)
+        .where(eq(securityPolicies.organizationId, auth.organizationId));
+      const maxConcurrent = Math.min(
+        deps.config.MAX_CONCURRENT_SCANS_PER_ORG,
+        orgPolicy?.maxConcurrentScans ?? deps.config.MAX_CONCURRENT_SCANS_PER_ORG
+      );
+
       const activeScans = await deps.db
         .select({ id: scans.id })
         .from(scans)
@@ -619,9 +680,9 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
           )
         );
 
-      if (activeScans.length >= deps.config.MAX_CONCURRENT_SCANS_PER_ORG) {
+      if (activeScans.length >= maxConcurrent) {
         throw new RateLimitError(
-          `Organization already has ${activeScans.length} active scans (limit: ${deps.config.MAX_CONCURRENT_SCANS_PER_ORG}).`
+          `Organization already has ${activeScans.length} active scans (limit: ${maxConcurrent}).`
         );
       }
 
@@ -636,8 +697,9 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
           triggerSource: project.isDemo ? "DEMO" : "MANUAL",
           branch: parsed.data.branch || repo.defaultBranch,
           status: "QUEUED",
-          requestedScanners: parsed.data.scanners ?? ["semgrep", "trivy", "gitleaks"],
-          runAiAnalysis: parsed.data.runAiAnalysis,
+          requestedScanners: parsed.data.scanners ?? [...DEFAULT_SCANNERS],
+          runAiAnalysis:
+            parsed.data.runAiAnalysis && (orgPolicy?.allowAiAnalysis ?? true),
           isDemoScan: project.isDemo,
           correlationId: request.correlationId
         })
@@ -699,7 +761,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
 
   app.get("/api/v1/scans/:scanId", { preHandler: [deps.requireAuth] }, async (request) => {
     const auth = request.auth as AuthContext;
-    const { scanId } = request.params as { scanId: string };
+    const scanId = assertUuidParam((request.params as { scanId: string }).scanId, "scanId");
 
     const [scan] = await deps.db
       .select()
@@ -805,6 +867,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
     if (projectId) conditions.push(eq(findings.projectId, projectId));
     if (q.scanId) conditions.push(eq(findings.latestScanId, q.scanId));
     if (q.severity) conditions.push(eq(findings.severity, q.severity));
+    if (q.riskPriority) conditions.push(eq(findings.riskPriority, q.riskPriority));
     if (q.category) conditions.push(eq(findings.category, q.category));
     if (q.scanner) conditions.push(eq(findings.scanner, q.scanner));
     if (q.status) conditions.push(eq(findings.status, q.status));
@@ -899,7 +962,10 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
 
   app.get("/api/v1/findings/:findingId", { preHandler: [deps.requireAuth] }, async (request) => {
     const auth = request.auth as AuthContext;
-    const { findingId } = request.params as { findingId: string };
+    const findingId = assertUuidParam(
+      (request.params as { findingId: string }).findingId,
+      "findingId"
+    );
 
     const [row] = await deps.db
       .select()
@@ -972,7 +1038,10 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
     { preHandler: [deps.requireAuth] },
     async (request) => {
       const auth = request.auth as AuthContext;
-      const { findingId } = request.params as { findingId: string };
+      const findingId = assertUuidParam(
+        (request.params as { findingId: string }).findingId,
+        "findingId"
+      );
 
       const parsed = FindingStatusTransitionRequestSchema.safeParse(request.body);
       if (!parsed.success) {
@@ -1082,7 +1151,18 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
     { preHandler: [deps.requireAuth] },
     async (request, reply) => {
       const auth = request.auth as AuthContext;
-      const { findingId } = request.params as { findingId: string };
+      const findingId = assertUuidParam(
+        (request.params as { findingId: string }).findingId,
+        "findingId"
+      );
+
+      const [orgPolicy] = await deps.db
+        .select()
+        .from(securityPolicies)
+        .where(eq(securityPolicies.organizationId, auth.organizationId));
+      if (orgPolicy && !orgPolicy.allowAiAnalysis) {
+        throw new ForbiddenError("AI analysis is disabled by organization security policy.");
+      }
 
       if (!deps.aiAnalyst.isEnabled) {
         return reply.status(503).send({
@@ -1171,6 +1251,14 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
             correlationId: request.correlationId
           }
         });
+      }
+
+      const [orgPolicy] = await deps.db
+        .select()
+        .from(securityPolicies)
+        .where(eq(securityPolicies.organizationId, auth.organizationId));
+      if (orgPolicy && !orgPolicy.allowAiAnalysis) {
+        throw new ForbiddenError("AI Security Advisor is disabled by organization security policy.");
       }
 
       const { scope, projectId, scanId, findingId, question } = parsed.data;
@@ -1461,4 +1549,143 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
         .send(jsonStream);
     }
   );
+
+  // ==========================================================================
+  // CI/CD Workflow & OIDC Security Intelligence View
+  // ==========================================================================
+  async function buildWorkflowSecuritySummary(
+    auth: AuthContext,
+    projectId?: string
+  ) {
+    const conditions = [
+      eq(findings.organizationId, auth.organizationId),
+      eq(findings.category, "CICD")
+    ];
+    if (projectId) {
+      conditions.push(eq(findings.projectId, projectId));
+    }
+
+    const cicdRows = await deps.db
+      .select()
+      .from(findings)
+      .where(and(...conditions))
+      .orderBy(desc(findings.lastSeenAt))
+      .limit(200);
+
+    const findingIds = cicdRows.map((r) => r.id);
+    const evRows =
+      findingIds.length > 0
+        ? await deps.db
+            .select()
+            .from(findingEvidence)
+            .where(
+              and(
+                eq(findingEvidence.organizationId, auth.organizationId),
+                inArray(findingEvidence.findingId, findingIds)
+              )
+            )
+        : [];
+
+    const evByFinding = new Map<string, Array<typeof findingEvidence.$inferSelect>>();
+    for (const ev of evRows) {
+      const list = evByFinding.get(ev.findingId) ?? [];
+      list.push(ev);
+      evByFinding.set(ev.findingId, list);
+    }
+
+    const mappedFindings = cicdRows.map((r) =>
+      mapFindingRowToContract(r, evByFinding.get(r.id) ?? [])
+    );
+
+    const byFile = new Map<
+      string,
+      {
+        filePath: string;
+        kind: "WORKFLOW" | "OIDC_TRUST_POLICY";
+        projectId: string;
+        findingsCount: number;
+        criticalCount: number;
+        highCount: number;
+        rulesTriggered: string[];
+        oidcRelated: boolean;
+      }
+    >();
+
+    for (const f of mappedFindings) {
+      const key = `${f.projectId}:${f.filePath ?? "repository"}`;
+      const isOidc = f.ruleId.startsWith("GHA-OIDC");
+      const entry = byFile.get(key) ?? {
+        filePath: f.filePath ?? "repository",
+        kind: isOidc && !(f.filePath ?? "").includes(".github/workflows")
+          ? "OIDC_TRUST_POLICY"
+          : "WORKFLOW",
+        projectId: f.projectId,
+        findingsCount: 0,
+        criticalCount: 0,
+        highCount: 0,
+        rulesTriggered: [],
+        oidcRelated: false
+      };
+      entry.findingsCount += 1;
+      if (f.severity === "CRITICAL") entry.criticalCount += 1;
+      if (f.severity === "HIGH") entry.highCount += 1;
+      if (!entry.rulesTriggered.includes(f.ruleId)) {
+        entry.rulesTriggered.push(f.ruleId);
+      }
+      if (isOidc || f.ruleId === "GHA-PERM-004") {
+        entry.oidcRelated = true;
+      }
+      byFile.set(key, entry);
+    }
+
+    const oidcFindings = mappedFindings.filter(
+      (f) => f.ruleId.startsWith("GHA-OIDC") || f.ruleId === "GHA-PERM-004"
+    );
+
+    return {
+      evidenceBasis: "STATIC_CONFIG",
+      disclaimer:
+        "Workflow and OIDC federation security data reflects deterministic static analysis of repository files. Live cloud IAM permissions, SCPs, and GitHub repository settings are not verified statically.",
+      summary: {
+        totalCicdFindings: mappedFindings.length,
+        critical: mappedFindings.filter((f) => f.severity === "CRITICAL").length,
+        high: mappedFindings.filter((f) => f.severity === "HIGH").length,
+        medium: mappedFindings.filter((f) => f.severity === "MEDIUM").length,
+        oidcFindingsCount: oidcFindings.length,
+        affectedFilesCount: byFile.size
+      },
+      assets: [...byFile.values()],
+      findings: mappedFindings
+    };
+  }
+
+  app.get("/api/v1/workflows", { preHandler: [deps.requireAuth] }, async (request) => {
+    const auth = request.auth as AuthContext;
+    const query = request.query as { projectId?: string };
+    const projectId = query.projectId ? assertUuidParam(query.projectId, "projectId") : undefined;
+    return buildWorkflowSecuritySummary(auth, projectId);
+  });
+
+  app.get(
+    "/api/v1/projects/:projectId/workflows",
+    { preHandler: [deps.requireAuth] },
+    async (request) => {
+      const auth = request.auth as AuthContext;
+      const projectId = assertUuidParam(
+        (request.params as { projectId: string }).projectId,
+        "projectId"
+      );
+      const [project] = await deps.db
+        .select({ id: projects.id })
+        .from(projects)
+        .where(and(eq(projects.id, projectId), eq(projects.organizationId, auth.organizationId)));
+      if (!project) throw new NotFoundError("Project");
+      return buildWorkflowSecuritySummary(auth, projectId);
+    }
+  );
+
+  app.get("/api/v1/scanners", { preHandler: [deps.requireAuth] }, async () => {
+    const rows = await deps.db.select().from(scannerMetadata);
+    return { scanners: rows };
+  });
 }

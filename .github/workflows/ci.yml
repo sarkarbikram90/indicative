@@ -1,0 +1,43 @@
+name: Indicative CI & Self-Security Verification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build, Typecheck & Automated Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@39370e3970a6d050c480ffad7ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies (lockfile-enforced)
+        run: npm ci
+
+      - name: Build all workspaces (topological order)
+        run: npm run build
+
+      - name: Strict TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Run unit, integration, security & CI/CD regression tests
+        run: npx vitest run packages/ai packages/cicd-security packages/findings packages/security tests/integration tests/security tests/regression/cicd-corpus-benchmark.test.ts
+
+      - name: Dogfood Indicative CI/CD & OIDC Security Analyzer against this repository
+        run: npm run scan:cicd -- . --ignore tests/fixtures --format markdown --policy failure

@@ -11,6 +11,11 @@ import {
   redactSecretsInText
 } from "@indicative/security";
 import { computeCanonicalFingerprint } from "./fingerprint.js";
+import {
+  defaultOfflineIntelligenceProvider,
+  resolveVulnerabilityIntelligence,
+  type VulnerabilityIntelligenceProvider
+} from "./intelligence.js";
 import { assessQualitativeRisk } from "./prioritization.js";
 
 const SEVERITY_RANK: Record<FindingSeverity, number> = {
@@ -102,6 +107,24 @@ function buildEvidenceForRaw(raw: RawScannerFinding): FindingEvidence[] {
         ...(raw.fixedVersion ? { fixedVersion: raw.fixedVersion } : {})
       }
     });
+  } else if (raw.category === "CICD") {
+    const isOidc =
+      raw.ruleId.startsWith("GHA-OIDC") ||
+      raw.rawMetadata?.evidenceType === "OIDC_TRUST_POLICY";
+    evidence.push({
+      id: crypto.randomUUID(),
+      type: isOidc ? "OIDC_TRUST_POLICY" : "WORKFLOW_CONFIG",
+      label: raw.filePath
+        ? `${raw.filePath}${raw.lineStart ? `:${raw.lineStart}` : ""}`
+        : isOidc
+          ? "Static OIDC Trust Configuration"
+          : "GitHub Actions Workflow Configuration",
+      content: redactSecretsInText(raw.codeSnippet || raw.description),
+      filePath: raw.filePath,
+      lineStart: raw.lineStart,
+      lineEnd: raw.lineEnd,
+      metadata: raw.rawMetadata
+    });
   } else if (raw.codeSnippet) {
     evidence.push({
       id: crypto.randomUUID(),
@@ -139,8 +162,10 @@ export function normalizeAndDeduplicateFindings(params: {
   scanId: string;
   rawFindings: RawScannerFinding[];
   nowIso?: string;
+  intelligenceProvider?: VulnerabilityIntelligenceProvider;
 }): NormalizedFindingBundle[] {
   const now = params.nowIso ?? new Date().toISOString();
+  const intelProvider = params.intelligenceProvider ?? defaultOfflineIntelligenceProvider;
   const grouped = new Map<string, NormalizedFindingBundle>();
 
   for (const raw of params.rawFindings) {
@@ -161,6 +186,23 @@ export function normalizeAndDeduplicateFindings(params: {
     const existing = grouped.get(fingerprint);
 
     if (!existing) {
+      const intelligence =
+        raw.category === "SCA"
+          ? resolveVulnerabilityIntelligence(raw.cve, intelProvider, "SCANNER_MATCH")
+          : undefined;
+      const cicdContext =
+        raw.category === "CICD"
+          ? {
+              untrustedTrigger: Boolean(raw.rawMetadata?.untrustedTrigger),
+              hasWritePermissions: Boolean(raw.rawMetadata?.hasWritePermissions),
+              correlatedOidcTrust: Boolean(raw.rawMetadata?.correlatedOidcTrust),
+              evidenceBasis:
+                typeof raw.rawMetadata?.evidenceBasis === "string"
+                  ? raw.rawMetadata.evidenceBasis
+                  : "STATIC_CONFIG"
+            }
+          : undefined;
+
       const risk = assessQualitativeRisk({
         category: raw.category,
         severity: raw.severity,
@@ -170,7 +212,9 @@ export function normalizeAndDeduplicateFindings(params: {
         fixedVersion: raw.fixedVersion,
         exposureLocation: raw.exposureLocation,
         secretType: raw.secretType,
-        occurrenceCount: 1
+        occurrenceCount: 1,
+        intelligence,
+        cicdContext
       });
 
       const canonical: SecurityFinding = {
@@ -206,6 +250,7 @@ export function normalizeAndDeduplicateFindings(params: {
         commitTimestamp: raw.commitTimestamp,
         exposureLocation: raw.exposureLocation,
         evidence: newEvidence,
+        intelligence,
         remediation: raw.remediationHint ? redactSecretsInText(raw.remediationHint) : undefined,
         status: "OPEN",
         verificationState: "DETECTED",
@@ -265,7 +310,8 @@ export function normalizeAndDeduplicateFindings(params: {
           fixedVersion: existing.finding.fixedVersion,
           exposureLocation: existing.finding.exposureLocation,
           secretType: existing.finding.secretType,
-          occurrenceCount: existing.finding.occurrenceCount
+          occurrenceCount: existing.finding.occurrenceCount,
+          intelligence: existing.finding.intelligence
         });
         existing.finding.riskPriority = updatedRisk.riskPriority;
         existing.finding.riskRationale = updatedRisk.riskRationale;

@@ -90,8 +90,8 @@ function FindingsContent() {
       <div>
         <h1 className="text-2xl font-bold text-white tracking-tight">Security Findings</h1>
         <p className="text-sm text-slate-400 mt-1">
-          Canonical, deduplicated findings normalized across Semgrep, Trivy, and Gitleaks. All
-          credentials remain strictly redacted.
+          Canonical, deduplicated findings normalized across Semgrep, Trivy, Gitleaks, and the
+          GitHub Actions / OIDC analyzer. All credentials remain strictly redacted.
         </p>
       </div>
 
@@ -146,7 +146,7 @@ function FindingsContent() {
           className="px-2.5 py-2 rounded-lg bg-[#0d1320] border border-slate-700 text-slate-200"
         >
           <option value="">All Categories</option>
-          {["SAST", "SCA", "SECRET", "IAC"].map((c) => (
+          {["SAST", "SCA", "SECRET", "IAC", "CICD"].map((c) => (
             <option key={c} value={c}>
               {c}
             </option>
@@ -161,7 +161,7 @@ function FindingsContent() {
           className="px-2.5 py-2 rounded-lg bg-[#0d1320] border border-slate-700 text-slate-200"
         >
           <option value="">All Scanners</option>
-          {["semgrep", "trivy", "gitleaks"].map((s) => (
+          {["semgrep", "trivy", "gitleaks", "cicd-github-actions"].map((s) => (
             <option key={s} value={s}>
               {s}
             </option>

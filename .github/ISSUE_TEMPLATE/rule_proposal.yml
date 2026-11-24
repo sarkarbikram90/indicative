@@ -1,0 +1,30 @@
+name: Security Rule Proposal
+description: Propose a new CI/CD, OIDC, SAST, or IaC detection rule
+labels: ["rule-proposal", "good first issue"]
+body:
+  - type: input
+    id: rule_id
+    attributes:
+      label: Proposed Rule ID
+      placeholder: "e.g. GHA-OIDC-004 or GHA-ACT-004"
+    validations:
+      required: true
+  - type: textarea
+    id: threat
+    attributes:
+      label: Security Problem & Attack Scenario
+      description: Explain the exact adversarial scenario, CWE/OWASP mapping, and why deterministic detection is appropriate.
+    validations:
+      required: true
+  - type: textarea
+    id: positive_fixture
+    attributes:
+      label: Vulnerable Fixture Example (True Positive)
+    validations:
+      required: true
+  - type: textarea
+    id: negative_fixture
+    attributes:
+      label: Hardened Fixture Example (True Negative / False-Positive Prevention)
+    validations:
+      required: true

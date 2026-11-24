@@ -56,8 +56,13 @@ export async function buildApiServer(
     contentSecurityPolicy: false // Swagger UI requires inline scripts on /docs
   });
 
+  const allowedCorsOrigins =
+    config.NODE_ENV === "production"
+      ? [config.WEB_PUBLIC_URL]
+      : [config.WEB_PUBLIC_URL, "http://localhost:3000", "http://127.0.0.1:3000"];
+
   await app.register(cors, {
-    origin: [config.WEB_PUBLIC_URL, "http://localhost:3000", "http://127.0.0.1:3000"],
+    origin: allowedCorsOrigins,
     credentials: true,
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"]
   });

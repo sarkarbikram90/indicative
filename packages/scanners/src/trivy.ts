@@ -19,6 +19,60 @@ export interface TrivyAdapterConfig {
   binaryPath: string;
   cacheDir: string;
   offlineMode?: boolean;
+  maxDbAgeDays?: number;
+}
+
+export interface TrivyDbFreshness {
+  present: boolean;
+  updatedAt?: string;
+  ageDays?: number;
+  stale: boolean;
+}
+
+export async function inspectTrivyOfflineDbFreshness(
+  cacheDir: string,
+  maxDbAgeDays = 14
+): Promise<TrivyDbFreshness> {
+  const dbPath = path.join(cacheDir, "db", "trivy.db");
+  try {
+    await fs.access(dbPath);
+  } catch {
+    return { present: false, stale: true };
+  }
+
+  const metaPath = path.join(cacheDir, "db", "metadata.json");
+  try {
+    const raw = await fs.readFile(metaPath, "utf8");
+    const meta = JSON.parse(raw) as { UpdatedAt?: string };
+    if (meta.UpdatedAt) {
+      const updatedMs = Date.parse(meta.UpdatedAt);
+      if (!Number.isNaN(updatedMs)) {
+        const ageDays = Math.max(0, (Date.now() - updatedMs) / (1000 * 60 * 60 * 24));
+        return {
+          present: true,
+          updatedAt: meta.UpdatedAt,
+          ageDays: Math.round(ageDays * 10) / 10,
+          stale: ageDays > maxDbAgeDays
+        };
+      }
+    }
+  } catch {
+    // metadata.json missing or unreadable; fall back to file mtime
+    try {
+      const stat = await fs.stat(dbPath);
+      const ageDays = Math.max(0, (Date.now() - stat.mtimeMs) / (1000 * 60 * 60 * 24));
+      return {
+        present: true,
+        updatedAt: stat.mtime.toISOString(),
+        ageDays: Math.round(ageDays * 10) / 10,
+        stale: ageDays > maxDbAgeDays
+      };
+    } catch {
+      return { present: true, stale: false };
+    }
+  }
+
+  return { present: true, stale: false };
 }
 
 interface TrivyVulnerability {
@@ -208,11 +262,13 @@ export class TrivyScannerAdapter implements ScannerAdapter {
   private readonly binaryPath: string;
   private readonly cacheDir: string;
   private readonly offlineMode: boolean;
+  private readonly maxDbAgeDays: number;
 
   constructor(config: TrivyAdapterConfig) {
     this.binaryPath = config.binaryPath;
     this.cacheDir = path.resolve(config.cacheDir);
     this.offlineMode = config.offlineMode ?? true;
+    this.maxDbAgeDays = config.maxDbAgeDays ?? 14;
   }
 
   async healthCheck(): Promise<ScannerHealth> {
@@ -237,17 +293,26 @@ export class TrivyScannerAdapter implements ScannerAdapter {
       this.version = versionMatch[1];
     }
 
-    // Verify offline vulnerability DB exists when running offline
+    // Verify offline vulnerability DB exists and inspect freshness when running offline
     if (this.offlineMode) {
-      const dbPath = path.join(this.cacheDir, "db", "trivy.db");
-      try {
-        await fs.access(dbPath);
-      } catch {
+      const freshness = await inspectTrivyOfflineDbFreshness(this.cacheDir, this.maxDbAgeDays);
+      if (!freshness.present) {
+        const dbPath = path.join(this.cacheDir, "db", "trivy.db");
         return {
           scanner: this.name,
           available: false,
           version: this.version,
           message: `Offline Trivy DB missing at ${dbPath}. Run trivy fs --download-db-only --cache-dir <dir>.`,
+          checkedAt
+        };
+      }
+      if (freshness.stale) {
+        return {
+          scanner: this.name,
+          available: true,
+          version: this.version,
+          rulesetVersion: `trivy-offline-db-v2 (updated ${freshness.updatedAt ?? "unknown"})`,
+          message: `Offline Trivy vulnerability DB is ${freshness.ageDays} days old (threshold: ${this.maxDbAgeDays} days). Refresh via infrastructure/scripts/update-trivy-db.sh.`,
           checkedAt
         };
       }
@@ -399,10 +464,28 @@ export class TrivyScannerAdapter implements ScannerAdapter {
 
       try {
         const findings = parseTrivyOutput(rawJson, context.workspacePath, this.version);
+        const limitations = [];
+        let rulesetVersion = "trivy-offline-db-v2";
+        if (this.offlineMode) {
+          const freshness = await inspectTrivyOfflineDbFreshness(
+            this.cacheDir,
+            this.maxDbAgeDays
+          );
+          if (freshness.updatedAt) {
+            rulesetVersion = `trivy-offline-db-v2@${freshness.updatedAt.slice(0, 10)}`;
+          }
+          if (freshness.stale) {
+            limitations.push({
+              code: "TRIVY_DB_STALE",
+              message: `Offline Trivy vulnerability DB is ${freshness.ageDays ?? "unknown"} days old (updated ${freshness.updatedAt ?? "unknown"}); recent CVEs may not be detected.`,
+              scopeAffected: "sca_vulnerability_db"
+            });
+          }
+        }
         return {
           scanner: this.name,
           scannerVersion: this.version,
-          rulesetVersion: "trivy-offline-db-v2",
+          rulesetVersion,
           capabilities: this.capabilities,
           status: "SUCCESS",
           errorClass: "NONE",
@@ -410,7 +493,7 @@ export class TrivyScannerAdapter implements ScannerAdapter {
           startedAt,
           completedAt,
           durationMs: execRes.durationMs,
-          limitations: [],
+          limitations,
           findings
         };
       } catch (err) {

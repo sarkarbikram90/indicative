@@ -84,6 +84,14 @@ export class IsolatedScannerRunner {
       });
     }
 
+    if (prepared.sanitization.unsanitizedEscapingSymlinks.length > 0) {
+      limitations.push({
+        code: "UNSANITIZED_ESCAPING_SYMLINKS",
+        message: `Workspace contains ${prepared.sanitization.unsanitizedEscapingSymlinks.length} escaping symbolic links on a read-only mount; refusing to scan for safety.`,
+        scopeAffected: "entire_repository"
+      });
+    }
+
     if (prepared.sanitization.exceededFileLimit) {
       limitations.push({
         code: "MAX_FILES_EXCEEDED",
@@ -100,12 +108,17 @@ export class IsolatedScannerRunner {
       });
     }
 
-    // Refuse execution if workspace exceeds configured hard size or file limits
+    // Refuse execution if workspace exceeds configured hard size/file limits or contains unsanitized escaping symlinks
     if (
       prepared.sanitization.exceededFileLimit ||
-      prepared.sanitization.exceededSizeLimit
+      prepared.sanitization.exceededSizeLimit ||
+      prepared.sanitization.unsanitizedEscapingSymlinks.length > 0
     ) {
       const now = new Date().toISOString();
+      const errorClass =
+        prepared.sanitization.unsanitizedEscapingSymlinks.length > 0
+          ? "INVALID_WORKSPACE"
+          : "RESOURCE_LIMIT";
       return {
         scanId: request.scanId,
         workspaceSummary: {
@@ -122,7 +135,7 @@ export class IsolatedScannerRunner {
           scannerVersion: "unknown",
           capabilities: [],
           status: "FAILED",
-          errorClass: "RESOURCE_LIMIT",
+          errorClass,
           errorMessage: limitations.map((l) => l.message).join(" "),
           exitCode: null,
           startedAt: now,

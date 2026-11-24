@@ -1,12 +1,13 @@
 import { and, desc, eq, ne } from "drizzle-orm";
 import type { AppConfig } from "@indicative/config";
-import type {
-  FindingStatus,
-  ScanStatus,
-  ScannerExecutionResult,
-  ScannerLimitation,
-  ScannerRunSummary,
-  SecurityFinding
+import {
+  DEFAULT_SCANNERS,
+  type FindingStatus,
+  type ScanStatus,
+  type ScannerExecutionResult,
+  type ScannerLimitation,
+  type ScannerRunSummary,
+  type SecurityFinding
 } from "@indicative/contracts";
 import {
   auditEvents,
@@ -251,7 +252,7 @@ export async function executeScanPipeline(
     const requestedScanners =
       Array.isArray(scanRow.requestedScanners) && scanRow.requestedScanners.length > 0
         ? scanRow.requestedScanners
-        : ["semgrep", "trivy", "gitleaks"];
+        : [...DEFAULT_SCANNERS];
 
     const scanExecStart = Date.now();
     let runnerResp: RunnerExecutionResponse;
@@ -401,7 +402,9 @@ export async function executeScanPipeline(
           (l) =>
             l.code === "NO_GIT_HISTORY" ||
             l.code === "SHALLOW_CLONE_HISTORY_TRUNCATED" ||
-            l.code === "GIT_HISTORY_SCAN_FAILED"
+            l.code === "GIT_HISTORY_SCAN_FAILED" ||
+            l.code === "WORKFLOW_YAML_PARSE_ERROR" ||
+            l.code === "WORKFLOW_FILE_LIMIT_REACHED"
         )
       }))
     });

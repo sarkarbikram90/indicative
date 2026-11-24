@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const FindingCategorySchema = z.enum(["SAST", "SCA", "SECRET", "IAC"]);
+export const FindingCategorySchema = z.enum(["SAST", "SCA", "SECRET", "IAC", "CICD"]);
 export type FindingCategory = z.infer<typeof FindingCategorySchema>;
 
 export const FindingSeveritySchema = z.enum([
@@ -59,7 +59,9 @@ export const FindingEvidenceSchema = z.object({
     "SECRET_EXPOSURE",
     "CONFIG_SNIPPET",
     "GIT_COMMIT",
-    "SCANNER_REFERENCE"
+    "SCANNER_REFERENCE",
+    "WORKFLOW_CONFIG",
+    "OIDC_TRUST_POLICY"
   ]),
   label: z.string(),
   content: z.string(),
@@ -72,6 +74,25 @@ export const FindingEvidenceSchema = z.object({
   metadata: z.record(z.union([z.string(), z.number(), z.boolean()])).optional()
 });
 export type FindingEvidence = z.infer<typeof FindingEvidenceSchema>;
+
+export const VulnerabilityIntelligenceSchema = z.object({
+  source: z.string(),
+  observedAt: z.string(),
+  kevListed: z.boolean().optional(),
+  kevDateAdded: z.string().optional(),
+  kevRequiredAction: z.string().optional(),
+  epssScore: z.number().min(0).max(1).optional(),
+  epssPercentile: z.number().min(0).max(1).optional(),
+  cweIds: z.array(z.string()).optional(),
+  reachabilityStatus: z.enum(["VERIFIED", "INFERRED", "UNKNOWN"]).default("UNKNOWN"),
+  exposureStatus: z
+    .enum(["VERIFIED_PUBLIC", "VERIFIED_INTERNAL", "INFERRED", "UNKNOWN"])
+    .default("UNKNOWN"),
+  evidenceBasis: z
+    .enum(["STATIC_CONFIG", "SCANNER_MATCH", "LIVE_VERIFIED"])
+    .optional()
+});
+export type VulnerabilityIntelligence = z.infer<typeof VulnerabilityIntelligenceSchema>;
 
 export const SecurityFindingSchema = z.object({
   id: z.string(),
@@ -115,6 +136,7 @@ export const SecurityFindingSchema = z.object({
   exposureLocation: ExposureLocationSchema.optional(),
 
   evidence: z.array(FindingEvidenceSchema),
+  intelligence: VulnerabilityIntelligenceSchema.optional(),
   remediation: z.string().optional(),
 
   status: FindingStatusSchema,

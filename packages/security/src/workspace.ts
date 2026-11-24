@@ -10,6 +10,7 @@ export interface WorkspaceSanitizationReport {
   fileCount: number;
   totalBytes: number;
   removedSymlinks: string[];
+  unsanitizedEscapingSymlinks: string[];
   suspiciousFilenames: string[];
   exceededFileLimit: boolean;
   exceededSizeLimit: boolean;
@@ -86,6 +87,7 @@ export async function sanitizeUntrustedWorkspace(
     fileCount: 0,
     totalBytes: 0,
     removedSymlinks: [],
+    unsanitizedEscapingSymlinks: [],
     suspiciousFilenames: [],
     exceededFileLimit: false,
     exceededSizeLimit: false,
@@ -121,11 +123,23 @@ export async function sanitizeUntrustedWorkspace(
         }
 
         if (shouldRemove) {
-          await fs.unlink(fullPath);
-          report.removedSymlinks.push(relPath);
-          report.warnings.push(
-            `Removed unsafe or escaping symbolic link prior to scanning: ${relPath}`
-          );
+          try {
+            await fs.unlink(fullPath);
+            report.removedSymlinks.push(relPath);
+            report.warnings.push(
+              `Removed unsafe or escaping symbolic link prior to scanning: ${relPath}`
+            );
+          } catch (unlinkErr) {
+            const code = (unlinkErr as NodeJS.ErrnoException).code;
+            if (code === "EROFS" || code === "EACCES" || code === "EPERM") {
+              report.unsanitizedEscapingSymlinks.push(relPath);
+              report.warnings.push(
+                `Unable to remove escaping symbolic link on read-only workspace (${code}): ${relPath}`
+              );
+            } else {
+              throw unlinkErr;
+            }
+          }
         }
         continue;
       }

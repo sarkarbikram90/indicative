@@ -12,6 +12,7 @@ interface DashboardData {
     repositoriesScanned: number;
     openFindings: number;
     resolvedOrNotDetected: number;
+    inconclusiveVerification?: number;
     critical: number;
     high: number;
     medium: number;
@@ -24,6 +25,7 @@ interface DashboardData {
     SCA: number;
     SECRET: number;
     IAC: number;
+    CICD?: number;
   };
   recentScans: Array<{
     id: string;
@@ -168,14 +170,14 @@ function DashboardView() {
 
         <div className="p-5 rounded-xl bg-[#111827] border border-slate-800 space-y-4">
           <h2 className="text-sm font-semibold text-white">Open Findings by Category</h2>
-          <div className="grid grid-cols-4 gap-3">
-            {(["SAST", "SCA", "SECRET", "IAC"] as const).map((cat) => (
+          <div className="grid grid-cols-5 gap-3">
+            {(["SAST", "SCA", "SECRET", "IAC", "CICD"] as const).map((cat) => (
               <div
                 key={cat}
                 className="p-3 rounded-lg bg-[#0d1320] border border-slate-800/80 text-center"
               >
                 <div className="text-2xl font-bold text-slate-100">
-                  {data.categoryBreakdown[cat]}
+                  {data.categoryBreakdown[cat] ?? 0}
                 </div>
                 <div className="text-xs font-mono text-slate-400 mt-1">{cat}</div>
               </div>

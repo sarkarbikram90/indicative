@@ -41,18 +41,21 @@ COPY packages/config ./packages/config
 COPY packages/contracts ./packages/contracts
 COPY packages/security ./packages/security
 COPY packages/scanners ./packages/scanners
+COPY packages/cicd-security ./packages/cicd-security
 COPY services/scanner-runner ./services/scanner-runner
 
 RUN npm install --workspace @indicative/config \
     --workspace @indicative/contracts \
     --workspace @indicative/security \
     --workspace @indicative/scanners \
+    --workspace @indicative/cicd-security \
     --workspace @indicative/scanner-runner \
     --include-workspace-root \
   && npm --workspace @indicative/config run build \
   && npm --workspace @indicative/contracts run build \
   && npm --workspace @indicative/security run build \
   && npm --workspace @indicative/scanners run build \
+  && npm --workspace @indicative/cicd-security run build \
   && npm --workspace @indicative/scanner-runner run build
 
 # Hardened non-root user (UID/GID 10001)

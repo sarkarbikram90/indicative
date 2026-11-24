@@ -1,0 +1,22 @@
+name: PR Review Automation (Deliberately Vulnerable Fixture)
+
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+
+permissions: write-all
+
+jobs:
+  review-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout untrusted PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Unsafe shell interpolation of PR title
+        run: |
+          echo "Reviewing PR: ${{ github.event.pull_request.title }}"
+          curl -fsSL https://example.invalid/install.sh | bash
+          npm install

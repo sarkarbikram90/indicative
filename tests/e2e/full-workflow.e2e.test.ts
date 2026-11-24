@@ -172,10 +172,11 @@ describe("End-to-End: Complete Indicative Workflow with REAL Semgrep, Trivy, and
     const scan1Body = scan1Detail.json();
     expect(scan1Body.scan.status).toBe("COMPLETED");
     expect(scan1Body.scan.commitSha).toMatch(/^[0-9a-f]{40}$/);
-    expect(scan1Body.scannerRuns).toHaveLength(3);
+    expect(scan1Body.scannerRuns).toHaveLength(4);
     for (const run of scan1Body.scannerRuns) {
       expect(run.status).toBe("SUCCESS");
     }
+    expect(scan1Body.scannerRuns.some((r: { scanner: string }) => r.scanner === "cicd-github-actions")).toBe(true);
 
     // Verify stage-level latency & peak RSS telemetry recorded for objective profiling (ADR-014)
     expect(typeof scan1Body.scan.summaryCounts.ingestMs).toBe("number");

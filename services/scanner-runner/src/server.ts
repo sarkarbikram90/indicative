@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import Fastify from "fastify";
 import { z } from "zod";
 import { loadConfig } from "@indicative/config";
+import { ScannerNameSchema } from "@indicative/contracts";
 import { createRedactingLogger } from "@indicative/security";
 import { createDefaultScannerRegistry } from "./adapters/registry.js";
 import { createResourceLimits, describeSandboxRuntime } from "./resource-limits/limits.js";
@@ -12,7 +13,7 @@ const executeBodySchema = z.object({
   organizationId: z.string().uuid(),
   projectId: z.string().uuid(),
   workspacePath: z.string().min(1),
-  scanners: z.array(z.enum(["semgrep", "trivy", "gitleaks"])).min(1)
+  scanners: z.array(ScannerNameSchema).min(1)
 });
 
 function verifySharedSecret(provided: string | undefined, expected: string): boolean {

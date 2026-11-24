@@ -25,6 +25,7 @@ RUN npm --workspace @indicative/config run build \
   && npm --workspace @indicative/shared run build \
   && npm --workspace @indicative/database run build \
   && npm --workspace @indicative/scanners run build \
+  && npm --workspace @indicative/cicd-security run build \
   && npm --workspace @indicative/findings run build \
   && npm --workspace @indicative/ai run build \
   && npm --workspace @indicative/scanner-runner run build \

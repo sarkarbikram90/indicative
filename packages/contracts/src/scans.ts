@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { ScannerLimitationSchema, ScannerExecutionStatusSchema } from "./scanners.js";
+import {
+  ScannerLimitationSchema,
+  ScannerExecutionStatusSchema,
+  ScannerNameSchema
+} from "./scanners.js";
 
 export const ScanStatusSchema = z.enum([
   "QUEUED",
@@ -63,7 +67,7 @@ export type ScanComparison = z.infer<typeof ScanComparisonSchema>;
 
 export const CreateScanRequestSchema = z.object({
   branch: z.string().trim().min(1).max(200).optional(),
-  scanners: z.array(z.enum(["semgrep", "trivy", "gitleaks"])).min(1).optional(),
+  scanners: z.array(ScannerNameSchema).min(1).optional(),
   runAiAnalysis: z.boolean().optional().default(false),
   idempotencyKey: z.string().trim().min(8).max(128).optional()
 });

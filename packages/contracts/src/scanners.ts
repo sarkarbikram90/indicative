@@ -5,12 +5,25 @@ export const ScannerCapabilitySchema = z.enum([
   "sast",
   "sca",
   "secrets",
-  "misconfiguration"
+  "misconfiguration",
+  "cicd"
 ]);
 export type ScannerCapability = z.infer<typeof ScannerCapabilitySchema>;
 
-export const ScannerNameSchema = z.enum(["semgrep", "trivy", "gitleaks"]);
+export const ScannerNameSchema = z.enum([
+  "semgrep",
+  "trivy",
+  "gitleaks",
+  "cicd-github-actions"
+]);
 export type ScannerName = z.infer<typeof ScannerNameSchema>;
+
+export const DEFAULT_SCANNERS: readonly ScannerName[] = [
+  "semgrep",
+  "trivy",
+  "gitleaks",
+  "cicd-github-actions"
+];
 
 export const ScannerExecutionStatusSchema = z.enum([
   "SUCCESS",

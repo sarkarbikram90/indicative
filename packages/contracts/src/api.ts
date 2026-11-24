@@ -3,7 +3,8 @@ import {
   FindingCategorySchema,
   FindingConfidenceSchema,
   FindingSeveritySchema,
-  FindingStatusSchema
+  FindingStatusSchema,
+  RiskPrioritySchema
 } from "./findings.js";
 
 export const PaginationQuerySchema = z.object({
@@ -14,6 +15,7 @@ export type PaginationQuery = z.infer<typeof PaginationQuerySchema>;
 
 export const FindingsFilterQuerySchema = PaginationQuerySchema.extend({
   severity: FindingSeveritySchema.optional(),
+  riskPriority: RiskPrioritySchema.optional(),
   category: FindingCategorySchema.optional(),
   scanner: z.string().trim().min(1).max(64).optional(),
   status: FindingStatusSchema.optional(),

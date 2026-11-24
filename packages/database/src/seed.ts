@@ -54,6 +54,14 @@ export async function seedDatabase(
       license: "MIT",
       capabilities: ["secrets"],
       healthy: true
+    },
+    {
+      scanner: "cicd-github-actions",
+      version: "1.0.0",
+      rulesetVersion: "indicative-cicd-gha-v1.0.0",
+      license: "Apache-2.0",
+      capabilities: ["cicd"],
+      healthy: true
     }
   ];
 
