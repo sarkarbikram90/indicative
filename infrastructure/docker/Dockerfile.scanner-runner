@@ -1,7 +1,7 @@
 # Indicative Isolated Scanner Runner Image
 # Pins exact scanner versions: Semgrep CE 1.186.0 (LGPL-2.1), Trivy 0.76.2 (Apache-2.0), Gitleaks 8.30.1 (MIT)
 # Pre-populates Trivy offline vulnerability DB & checks cache during build so runtime scanning requires ZERO internet access.
-FROM node:22-bookworm-slim AS scanner-runner
+FROM node:25-bookworm-slim AS scanner-runner
 
 ARG SEMGREP_VERSION=1.186.0
 ARG TRIVY_VERSION=0.76.2
