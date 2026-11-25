@@ -97,6 +97,22 @@ export function computeCanonicalFingerprint(
       ])}`;
     }
 
+    case "CLOUD_IDENTITY": {
+      const identityAnchor =
+        typeof finding.rawMetadata?.identityAnchor === "string"
+          ? finding.rawMetadata.identityAnchor
+          : normalizeCodeAnchor(finding.codeSnippet) || String(finding.lineStart ?? 0);
+      return `fp:cloud-id:${sha256([
+        "v1",
+        "CLOUD_IDENTITY",
+        projectId,
+        finding.scanner,
+        finding.ruleId,
+        file,
+        identityAnchor
+      ])}`;
+    }
+
     case "SAST":
     default: {
       const anchor = normalizeCodeAnchor(finding.codeSnippet) || String(finding.lineStart ?? 0);

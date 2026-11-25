@@ -1,5 +1,5 @@
 name: "Indicative CI/CD & OIDC Security Scan"
-description: "Audit GitHub Actions workflows and static AWS/Azure/GCP OIDC trust policies with SARIF Code Scanning upload and Job Summaries."
+description: "Audit GitHub Actions workflows and static AWS/Azure/GCP OIDC trust policies with .indicative.yml config, baseline diffing, SARIF Code Scanning upload, and Job Summaries."
 author: "Indicative Contributors"
 
 branding:
@@ -12,9 +12,17 @@ inputs:
     required: false
     default: "."
   policy:
-    description: "Policy enforcement mode: informational | warning | failure."
+    description: "Policy enforcement mode: informational | warning | failure. Leave empty to use .indicative.yml or default (warning)."
     required: false
-    default: "warning"
+    default: ""
+  config:
+    description: "Optional explicit path to .indicative.yml / .indicative.json configuration file."
+    required: false
+    default: ""
+  baseline:
+    description: "Optional path to a baseline JSON file for differential/ratchet mode (only new findings fail CI)."
+    required: false
+    default: ""
   ignore:
     description: "Comma- or newline-separated path prefixes to exclude from scanning."
     required: false
@@ -42,8 +50,14 @@ inputs:
 
 outputs:
   findings-count:
-    description: "Total CI/CD and OIDC findings detected."
+    description: "Total active (unsuppressed) CI/CD and OIDC findings detected."
     value: ${{ steps.scan.outputs.findings-count }}
+  new-findings-count:
+    description: "Findings newly introduced relative to baseline (equals findings-count when no baseline is used)."
+    value: ${{ steps.scan.outputs.new-findings-count }}
+  suppressed-count:
+    description: "Number of findings suppressed via .indicative.yml or inline directives."
+    value: ${{ steps.scan.outputs.suppressed-count }}
   blocking-count:
     description: "Number of findings violating the configured policy."
     value: ${{ steps.scan.outputs.blocking-count }}
@@ -62,28 +76,36 @@ runs:
       with:
         node-version: ${{ inputs.node-version }}
 
-    - name: Install & build Indicative CI/CD analyzer
+    - name: Prepare Indicative CI/CD analyzer entrypoint
+      id: prepare
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
-        if [ ! -f "${ACTION_PATH}/packages/cicd-security/dist/cli.js" ]; then
-          cd "${ACTION_PATH}"
-          npm ci --ignore-scripts
-          npm --workspace @indicative/config run build
-          npm --workspace @indicative/contracts run build
-          npm --workspace @indicative/security run build
-          npm --workspace @indicative/cicd-security run build
+        if [ -f "${ACTION_PATH}/action-dist/cicd-cli.cjs" ]; then
+          echo "cli-entry=${ACTION_PATH}/action-dist/cicd-cli.cjs" >> "${GITHUB_OUTPUT}"
+        else
+          if [ ! -f "${ACTION_PATH}/packages/cicd-security/dist/cli.js" ]; then
+            cd "${ACTION_PATH}"
+            npm ci --ignore-scripts
+            npm --workspace @indicative/config run build
+            npm --workspace @indicative/contracts run build
+            npm --workspace @indicative/security run build
+            npm --workspace @indicative/cicd-security run build
+          fi
+          echo "cli-entry=${ACTION_PATH}/packages/cicd-security/dist/cli.js" >> "${GITHUB_OUTPUT}"
         fi
 
     - name: Run Indicative CI/CD & OIDC Security Analyzer
       id: scan
       shell: bash
       env:
-        ACTION_PATH: ${{ github.action_path }}
+        CLI_ENTRY: ${{ steps.prepare.outputs.cli-entry }}
         INPUT_PATH: ${{ inputs.path }}
         INPUT_POLICY: ${{ inputs.policy }}
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_BASELINE: ${{ inputs.baseline }}
         INPUT_IGNORE: ${{ inputs.ignore }}
         INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
         INPUT_ANNOTATIONS: ${{ inputs.annotations }}
@@ -93,7 +115,16 @@ runs:
         TARGET_ABS="$(realpath "${INPUT_PATH}")"
         SARIF_ABS="$(realpath -m "${INPUT_SARIF_FILE}")"
 
-        ARGS=("${TARGET_ABS}" "--format" "markdown" "--policy" "${INPUT_POLICY}" "--sarif-file" "${SARIF_ABS}")
+        ARGS=("${TARGET_ABS}" "--format" "markdown" "--sarif-file" "${SARIF_ABS}")
+        if [ -n "${INPUT_POLICY}" ]; then
+          ARGS+=("--policy" "${INPUT_POLICY}")
+        fi
+        if [ -n "${INPUT_CONFIG}" ]; then
+          ARGS+=("--config" "${INPUT_CONFIG}")
+        fi
+        if [ -n "${INPUT_BASELINE}" ]; then
+          ARGS+=("--baseline" "$(realpath "${INPUT_BASELINE}")")
+        fi
         if [ -n "${INPUT_IGNORE}" ]; then
           ARGS+=("--ignore" "${INPUT_IGNORE}")
         fi
@@ -108,7 +139,7 @@ runs:
         fi
 
         set +e
-        node "${ACTION_PATH}/packages/cicd-security/dist/cli.js" "${ARGS[@]}"
+        node "${CLI_ENTRY}" "${ARGS[@]}"
         EXIT_CODE=$?
         set -e
 

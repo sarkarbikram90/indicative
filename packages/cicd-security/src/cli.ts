@@ -1,6 +1,8 @@
+#!/usr/bin/env node
 import fs from "node:fs/promises";
 import path from "node:path";
 import { analyzeWorkspaceCicdSecurity } from "./adapter.js";
+import { writeBaselineFile } from "./baseline.js";
 import {
   formatCicdReportAsSarif,
   formatGitHubAnnotations,
@@ -12,7 +14,12 @@ export interface CicdCliOptions {
   targetPath: string;
   format: "json" | "markdown" | "annotations" | "sarif";
   policyMode: CicdPolicyMode;
+  policyExplicit?: boolean;
   ignorePaths: string[];
+  configPath?: string;
+  disableRepoConfig?: boolean;
+  baselinePath?: string;
+  writeBaselinePath?: string;
   outputFile?: string;
   sarifFile?: string;
   summaryFile?: string;
@@ -24,7 +31,12 @@ export function parseCicdCliArgs(args: string[]): CicdCliOptions {
   let targetPath = process.cwd();
   let format: "json" | "markdown" | "annotations" | "sarif" = "markdown";
   let policyMode: CicdPolicyMode = "warning";
+  let policyExplicit = false;
   const ignorePaths: string[] = [];
+  let configPath: string | undefined;
+  let disableRepoConfig = false;
+  let baselinePath: string | undefined;
+  let writeBaselinePath: string | undefined;
   let outputFile: string | undefined;
   let sarifFile: string | undefined;
   let summaryFile: string | undefined;
@@ -40,14 +52,29 @@ export function parseCicdCliArgs(args: string[]): CicdCliOptions {
       }
     } else if (arg === "--policy" && args[i + 1]) {
       const p = args[++i]!;
-      if (p === "informational" || p === "info") policyMode = "informational";
-      else if (p === "warning" || p === "warn") policyMode = "warning";
-      else if (p === "failure" || p === "fail") policyMode = "failure";
+      if (p === "informational" || p === "info") {
+        policyMode = "informational";
+        policyExplicit = true;
+      } else if (p === "warning" || p === "warn") {
+        policyMode = "warning";
+        policyExplicit = true;
+      } else if (p === "failure" || p === "fail") {
+        policyMode = "failure";
+        policyExplicit = true;
+      }
     } else if (arg === "--ignore" && args[i + 1]) {
       const raw = args[++i]!;
       for (const entry of raw.split(/[,\n]/).map((s) => s.trim()).filter(Boolean)) {
         ignorePaths.push(entry);
       }
+    } else if (arg === "--config" && args[i + 1]) {
+      configPath = args[++i]!;
+    } else if (arg === "--no-config") {
+      disableRepoConfig = true;
+    } else if (arg === "--baseline" && args[i + 1]) {
+      baselinePath = path.resolve(args[++i]!);
+    } else if (arg === "--write-baseline" && args[i + 1]) {
+      writeBaselinePath = path.resolve(args[++i]!);
     } else if (arg === "--output" && args[i + 1]) {
       outputFile = path.resolve(args[++i]!);
     } else if (arg === "--sarif-file" && args[i + 1]) {
@@ -67,7 +94,12 @@ export function parseCicdCliArgs(args: string[]): CicdCliOptions {
     targetPath,
     format,
     policyMode,
+    policyExplicit,
     ignorePaths,
+    configPath,
+    disableRepoConfig,
+    baselinePath,
+    writeBaselinePath,
     outputFile,
     sarifFile,
     summaryFile,
@@ -78,11 +110,18 @@ export function parseCicdCliArgs(args: string[]): CicdCliOptions {
 
 export async function runCicdCli(options: CicdCliOptions): Promise<number> {
   const report = await analyzeWorkspaceCicdSecurity(options.targetPath, {
-    mode: options.policyMode,
-    failOnSeverities: ["CRITICAL", "HIGH"],
-    ignorePaths: options.ignorePaths
+    mode: options.policyExplicit === false ? undefined : options.policyMode,
+    ignorePaths: options.ignorePaths,
+    configPath: options.configPath,
+    disableRepoConfig: options.disableRepoConfig,
+    baselinePath: options.baselinePath
   });
 
+  if (options.writeBaselinePath) {
+    await writeBaselineFile(options.writeBaselinePath, report.findings, report.scanner);
+  }
+
+  const effectiveFindings = report.newFindings ?? report.findings;
   const markdownSummary = formatPullRequestMarkdownSummary(report);
   let primaryOutput: string;
   if (options.format === "json") {
@@ -90,7 +129,7 @@ export async function runCicdCli(options: CicdCliOptions): Promise<number> {
   } else if (options.format === "sarif") {
     primaryOutput = formatCicdReportAsSarif(report);
   } else if (options.format === "annotations") {
-    primaryOutput = formatGitHubAnnotations(report.findings);
+    primaryOutput = formatGitHubAnnotations(effectiveFindings);
   } else {
     primaryOutput = markdownSummary;
   }
@@ -115,13 +154,15 @@ export async function runCicdCli(options: CicdCliOptions): Promise<number> {
   }
 
   if (options.emitAnnotations && options.format !== "annotations") {
-    const annotations = formatGitHubAnnotations(report.findings);
+    const annotations = formatGitHubAnnotations(effectiveFindings);
     if (annotations) console.log(annotations);
   }
 
   if (options.githubOutputFile) {
     const outputLines = [
       `findings-count=${report.findings.length}`,
+      `new-findings-count=${effectiveFindings.length}`,
+      `suppressed-count=${report.suppressedFindings.length}`,
       `blocking-count=${report.policyEvaluation.blockingFindingsCount}`,
       `policy-passed=${report.policyEvaluation.passed ? "true" : "false"}`,
       `sarif-file=${options.sarifFile ?? (options.format === "sarif" ? (options.outputFile ?? "") : "")}`
@@ -138,7 +179,12 @@ async function main() {
   process.exit(exitCode);
 }
 
-const isMain = process.argv[1]?.endsWith("cli.ts") || process.argv[1]?.endsWith("cli.js");
+const argv1 = process.argv[1] ?? "";
+const isMain =
+  argv1.endsWith("cli.ts") ||
+  argv1.endsWith("cli.js") ||
+  argv1.endsWith("cli.cjs") ||
+  argv1.endsWith("indicative-cicd");
 if (isMain) {
   main().catch((err) => {
     console.error("[indicative/cicd-security] CLI error:", (err as Error).message);

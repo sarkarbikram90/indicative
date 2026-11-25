@@ -21,7 +21,8 @@
 | Secret & Verification Integrity (`v0.1.0`) | Tenant-keyed `HKDF+HMAC-SHA256` fingerprinting, linear-time PEM scrubbing, chunked redaction, honest `NOT_VERIFIED` credential status & `VERIFICATION_INCONCLUSIVE` failure transparency | ✅ Verified |
 | Contextual Intelligence (`v0.2.0`) | Offline-capable CISA KEV + FIRST EPSS enrichment with explicit source/observation provenance and `[VERIFIED]` / `[INFERRED]` / `[UNKNOWN]` risk rationale | ✅ Verified |
 | CI/CD & OIDC Security (`v0.2.0`) | `@indicative/cicd-security` AST YAML GitHub Actions analyzer (16 versioned rules), static AWS/Azure/GCP OIDC trust correlation, standalone CLI, policy modes, `/api/v1/workflows`, and `/workflows` UI view | ✅ Verified |
-| Developer Workflow & Automation (`v0.2.0`) | HMAC-SHA256 GitHub Webhooks (`X-Hub-Signature-256`) with replay protection + automated PR comments & Check Runs, reusable composite GitHub Action (`action.yml`) with SARIF 2.1.0 Code Scanning upload, cron-scheduled recurring scans, encrypted Slack/Jira/GitHub Issue notifications, and `/automations` UI | ✅ Verified |
+| Developer Workflow & Automation (`v0.2.0`) | HMAC-SHA256 GitHub Webhooks (`X-Hub-Signature-256`) with replay protection + automated PR comments & Check Runs, pre-bundled reusable GitHub Action (`action.yml` + `action-dist/cicd-cli.cjs`) with SARIF 2.1.0 upload, `.indicative.yml` config, inline expiring suppressions, baseline ratchet mode, `.pre-commit-hooks.yaml`, `.github/workflows/release.yml`, Dependabot, ESLint/Prettier, cron-scheduled scans, encrypted Slack/Jira/GitHub notifications, and `/automations` UI | ✅ Verified |
+| Static Cloud Identity & AWS IAM (`v0.3.0-dev`) | `@indicative/cloud-identity` static AWS IAM policy & privilege-escalation analyzer (Terraform HCL, CloudFormation, IAM JSON; 8 versioned rules `IAM-*`), workflow-to-role identity linking (`role-to-assume`), evidence-backed CI/CD → OIDC → IAM correlated chains with explicit `UNKNOWN` runtime control disclosures, standalone CLI (`npm run scan:cloud-identity`), and `scanner-runner` `CloudIdentityIamAdapter` | ✅ Verified |
 | Audit Hardening & OSS Foundation (`v0.2.0`) | Writable-phase symlink sanitization, UUID validation, production CORS restriction, `security_policies` enforcement, `SECURITY.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`, dogfooded CI | ✅ Verified |
 
 ---
@@ -45,11 +46,13 @@ indicative/
 │   ├── shared/                 # AppError hierarchy, correlation IDs, Prometheus metrics, S3/MinIO & local artifact storage
 │   ├── database/               # PostgreSQL 16 + Drizzle ORM (23 tables), SQL migrations, seed script
 │   ├── scanners/               # ScannerAdapter contract + Semgrep, Trivy (with DB freshness check), Gitleaks adapters
-│   ├── cicd-security/          # GitHub Actions AST YAML analyzer, AWS/Azure/GCP static OIDC trust correlator, CLI & policy engine
+│   ├── cicd-security/          # GitHub Actions AST YAML analyzer, AWS/Azure/GCP static OIDC trust correlator, .indicative.yml, suppressions, baseline diff, CLI & policy engine
+│   ├── cloud-identity/         # Static AWS IAM policy & privilege-escalation analyzer + workflow-to-role correlated chain engine (Terraform, CFN, JSON)
 │   ├── findings/               # Normalization, category fingerprinting, KEV/EPSS enrichment, lifecycle, prioritization, JSON/SARIF/CSV
 │   └── ai/                     # Optional provider-agnostic OpenAI-compatible AI Analyst + fail-closed pre-LLM redaction gate
 ├── rules/
-│   └── cicd/github-actions/    # Versioned CI/CD & OIDC rule documentation (indicative-cicd-gha-v1.0.0)
+│   ├── cicd/github-actions/    # Versioned CI/CD & OIDC rule documentation (indicative-cicd-gha-v1.0.0)
+│   └── cloud-identity/aws-iam/ # Versioned AWS IAM & Workflow-to-Role rule documentation (indicative-cloud-iam-v1.0.0)
 ├── infrastructure/
 │   ├── docker/                 # Dockerfiles for node services, web, and hardened offline scanner-runner
 │   ├── sandbox/                # gVisor / Kata Containers / seccomp deployment profiles
@@ -65,7 +68,8 @@ indicative/
 | **Semgrep CE** | `1.186.0` | SAST (`JavaScript`, `TypeScript`, `Python`) | LGPL-2.1 | Offline pinned ruleset (`indicative-sast-v1.0.0`), `--metrics=off` |
 | **Trivy** | `0.76.2` | SCA (lockfiles) & IaC misconfiguration (Docker, K8s, Terraform) | Apache-2.0 | Air-gapped offline scan + `metadata.json` DB staleness detection |
 | **Gitleaks** | `8.30.1` | Exposed secrets in working tree (`dir`) AND Git commit history (`git`) | MIT | Immediate in-memory tenant HMAC fingerprinting, redaction & `finally` raw disposal |
-| **Indicative CI/CD & OIDC** | `1.0.0` | GitHub Actions workflows (permissions, triggers, script injection, SHA pinning, secrets, build integrity) & static AWS/Azure/GCP OIDC trust correlation | Apache-2.0 | Offline AST YAML 1.2 parser (`maxAliasCount`, size limits), `STATIC_CONFIG` evidence basis |
+| **Indicative CI/CD & OIDC** | `1.0.0` | GitHub Actions workflows (permissions, triggers, script injection, SHA pinning, secrets, build integrity), static AWS/Azure/GCP OIDC trust correlation, `.indicative.yml`, expiring suppressions & baseline ratchet | Apache-2.0 | Offline AST YAML 1.2 parser (`maxAliasCount`, size limits), `STATIC_CONFIG` evidence basis |
+| **Indicative Cloud Identity** | `1.0.0` | Static AWS IAM policies (Terraform, CloudFormation, IAM JSON), admin/service wildcards, secret read, `iam:PassRole` / IAM mutation escalation, boundaries, and GitHub Actions → OIDC → IAM role correlation | Apache-2.0 | Offline deterministic IaC parser + `CloudIdentityIamAdapter`, `STATIC_CONFIG` + explicit `UNKNOWN` control disclosures |
 
 ---
 
@@ -85,10 +89,14 @@ npm run scan:cicd -- . --format markdown
 # Inspect deliberately vulnerable CI/CD + OIDC fixture
 npm run scan:cicd -- tests/fixtures/cicd-vulnerable --format markdown
 
-# GitHub Actions annotations, SARIF 2.1.0, or strict CI policy gate
+# GitHub Actions annotations, SARIF 2.1.0, baseline ratchet, or strict CI policy gate
 npm run scan:cicd -- . --format annotations
 npm run scan:cicd -- . --format sarif --sarif-file indicative-cicd.sarif
-npm run scan:cicd -- . --format json --policy failure
+npm run scan:cicd -- . --write-baseline .indicative-baseline.json
+npm run scan:cicd -- . --baseline .indicative-baseline.json --policy failure
+
+# Run static AWS IAM & Workflow-to-Role Cloud Identity analyzer
+npm run scan:cloud-identity -- tests/fixtures/cloud-identity-vulnerable --format markdown
 ```
 
 ### Reusable GitHub Action (3-Line Setup + SARIF Code Scanning Upload)
@@ -146,6 +154,10 @@ npm run test:regression
 - **CI/CD & OIDC Regression Corpus (`tests/regression/cicd-corpus-benchmark.test.ts`):**
   - Expected rule families (`tests/fixtures/cicd-vulnerable` — 2 workflows + AWS/Azure/GCP Terraform OIDC policies): `16/16` True Positives (`25` total findings), `0` missed rules
   - Hardened corpus (`tests/fixtures/cicd-hardened` — hardened CI + safe `pull_request_target` labeler + environment-bound AWS/Azure/GCP OIDC policies): `0` False Positives
+  - Precision `1.0000`, Recall `1.0000`.
+- **Cloud Identity & AWS IAM Regression Corpus (`tests/regression/cloud-identity-corpus-benchmark.test.ts`):**
+  - Expected rule families (`tests/fixtures/cloud-identity-vulnerable` — e-commerce workflow + Terraform/CloudFormation IAM roles & policies): `8/8` True Positives (`IAM-ADMIN-001`, `IAM-PERM-001..002`, `IAM-DATA-001`, `IAM-ESC-001..002`, `IAM-BOUND-001`, `IAM-CORR-001`), `0` missed rules
+  - Hardened corpus (`tests/fixtures/cloud-identity-hardened` — environment-gated workflow + ARN-scoped IAM role with permissions boundary and explicit Deny): `0` False Positives
   - Precision `1.0000`, Recall `1.0000`.
 - **Benchmark Disclosure:** Fixture corpora prove deterministic behavior and false-positive discipline on covered rule patterns, not universal detection accuracy across arbitrary enterprise repositories.
 

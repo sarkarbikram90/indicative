@@ -7,10 +7,14 @@ import {
 import type {
   CicdAnalysisReport,
   CicdPolicyConfig,
-  CicdPolicyEvaluation
+  CicdPolicyEvaluation,
+  CicdPolicyMode
 } from "./types.js";
 
-export const DEFAULT_CICD_POLICY: CicdPolicyConfig = {
+export const DEFAULT_CICD_POLICY: CicdPolicyConfig & {
+  mode: CicdPolicyMode;
+  failOnSeverities: FindingSeverity[];
+} = {
   mode: "warning",
   failOnSeverities: ["CRITICAL", "HIGH"]
 };
@@ -23,10 +27,12 @@ export function evaluateCicdPolicy(
   findings: RawScannerFinding[],
   policy: CicdPolicyConfig = DEFAULT_CICD_POLICY
 ): CicdPolicyEvaluation {
-  const failSet = new Set<FindingSeverity>(policy.failOnSeverities);
+  const mode = policy.mode ?? DEFAULT_CICD_POLICY.mode;
+  const failOnSeverities = policy.failOnSeverities ?? DEFAULT_CICD_POLICY.failOnSeverities;
+  const failSet = new Set<FindingSeverity>(failOnSeverities);
   const matching = findings.filter((f) => failSet.has(f.severity));
 
-  if (policy.mode === "informational") {
+  if (mode === "informational") {
     return {
       mode: "informational",
       passed: true,
@@ -37,14 +43,14 @@ export function evaluateCicdPolicy(
     };
   }
 
-  if (policy.mode === "warning") {
+  if (mode === "warning") {
     return {
       mode: "warning",
       passed: true,
       exitCode: 0,
       blockingFindingsCount: 0,
       warningFindingsCount: matching.length,
-      summary: `Warning mode: ${findings.length} CI/CD findings (${matching.length} at ${policy.failOnSeverities.join("/")}); pipeline not blocked.`
+      summary: `Warning mode: ${findings.length} CI/CD findings (${matching.length} at ${failOnSeverities.join("/")}); pipeline not blocked.`
     };
   }
 
@@ -56,8 +62,8 @@ export function evaluateCicdPolicy(
     blockingFindingsCount: matching.length,
     warningFindingsCount: findings.length - matching.length,
     summary: passed
-      ? `Policy passed: 0 blocking CI/CD findings at ${policy.failOnSeverities.join("/")}.`
-      : `Policy failed: ${matching.length} blocking CI/CD finding(s) at ${policy.failOnSeverities.join("/")}.`
+      ? `Policy passed: 0 blocking CI/CD findings at ${failOnSeverities.join("/")}.`
+      : `Policy failed: ${matching.length} blocking CI/CD finding(s) at ${failOnSeverities.join("/")}.`
   };
 }
 
@@ -121,7 +127,30 @@ export function formatPullRequestMarkdownSummary(report: CicdAnalysisReport): st
   lines.push(
     `- **Policy Decision:** \`${report.policyEvaluation.mode.toUpperCase()}\` — ${report.policyEvaluation.summary}`
   );
+  if (report.configPath) {
+    lines.push(`- **Repo Config:** \`${report.configPath}\``);
+  }
+  if (report.suppressedFindings.length > 0) {
+    lines.push(
+      `- **Audited Suppressions:** ${report.suppressedFindings.length} finding(s) suppressed via config or inline directives`
+    );
+  }
+  if (report.baselineDiff) {
+    lines.push(
+      `- **Baseline Diff (\`${report.baselineDiff.baselinePath}\`):** **${report.baselineDiff.newFindingsCount}** new, ${report.baselineDiff.existingBaselineFindingsCount} existing baseline, ${report.baselineDiff.resolvedBaselineCount} resolved since baseline (policy gates new findings only)`
+    );
+  }
   lines.push("");
+
+  if (report.expiredSuppressions.length > 0) {
+    lines.push(`### Expired Suppressions (${report.expiredSuppressions.length} — Re-Enforced)`);
+    for (const exp of report.expiredSuppressions) {
+      lines.push(
+        `- \`${exp.ruleId}\` (${exp.filePath ?? "repo"}): expired \`${exp.expires}\` — ${redactSecretsInText(exp.reason)}`
+      );
+    }
+    lines.push("");
+  }
 
   if (report.limitations.length > 0) {
     lines.push("### Coverage Limitations");
@@ -131,14 +160,23 @@ export function formatPullRequestMarkdownSummary(report: CicdAnalysisReport): st
     lines.push("");
   }
 
-  if (report.findings.length === 0) {
-    lines.push("No CI/CD workflow or static OIDC trust weaknesses detected within scanned scope.");
+  const displayedFindings = report.newFindings ?? report.findings;
+  if (displayedFindings.length === 0) {
+    lines.push(
+      report.baselineDiff
+        ? "No **new** CI/CD workflow or static OIDC trust weaknesses introduced relative to the baseline."
+        : "No CI/CD workflow or static OIDC trust weaknesses detected within scanned scope."
+    );
   } else {
-    lines.push(`### Findings (${report.findings.length})`);
+    lines.push(
+      report.baselineDiff
+        ? `### New Findings Relative to Baseline (${displayedFindings.length})`
+        : `### Findings (${displayedFindings.length})`
+    );
     lines.push("");
     lines.push("| Severity | Rule | Location | Summary |");
     lines.push("|---|---|---|---|");
-    for (const f of report.findings) {
+    for (const f of displayedFindings) {
       const loc = f.filePath ? `\`${f.filePath}${f.lineStart ? `:${f.lineStart}` : ""}\`` : "—";
       const safeTitle = redactSecretsInText(f.title).replace(/\|/g, "\\|");
       lines.push(`| **${f.severity}** | \`${f.ruleId}\` | ${loc} | ${safeTitle} |`);

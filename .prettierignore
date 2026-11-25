@@ -1,0 +1,11 @@
+node_modules
+dist
+.next
+action-dist
+coverage
+tests/fixtures
+package-lock.json
+.trivy-cache
+.local-artifacts
+.indicative-tmp
+*.sarif

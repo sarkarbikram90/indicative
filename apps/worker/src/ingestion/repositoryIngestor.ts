@@ -81,7 +81,7 @@ async function readGitHeadMetadata(
     };
   }
 
-  let isShallowClone = false;
+  let isShallowClone: boolean;
   try {
     await fs.access(path.join(gitDir, "shallow"));
     isShallowClone = true;

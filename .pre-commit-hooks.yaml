@@ -1,0 +1,7 @@
+- id: indicative-cicd
+  name: Indicative CI/CD & OIDC Security Scan
+  description: Audit GitHub Actions workflows and static AWS/Azure/GCP OIDC trust policies before committing.
+  entry: node action-dist/cicd-cli.cjs . --format markdown --policy failure
+  language: system
+  pass_filenames: false
+  files: (^(\.github/workflows/.*\.(yml|yaml))$|.*\.(tf|json|yml|yaml)$)

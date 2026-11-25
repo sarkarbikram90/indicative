@@ -1,5 +1,6 @@
 import type { ScannerAdapter, ScannerHealth } from "@indicative/contracts";
 import { CicdGitHubActionsAdapter } from "@indicative/cicd-security";
+import { CloudIdentityIamAdapter } from "@indicative/cloud-identity";
 import {
   GitleaksScannerAdapter,
   SemgrepScannerAdapter,
@@ -57,6 +58,7 @@ export function createDefaultScannerRegistry(
     new GitleaksScannerAdapter({
       binaryPath: config.gitleaksBin
     }),
-    new CicdGitHubActionsAdapter()
+    new CicdGitHubActionsAdapter(),
+    new CloudIdentityIamAdapter()
   ]);
 }

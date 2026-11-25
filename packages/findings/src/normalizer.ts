@@ -125,6 +125,24 @@ function buildEvidenceForRaw(raw: RawScannerFinding): FindingEvidence[] {
       lineEnd: raw.lineEnd,
       metadata: raw.rawMetadata
     });
+  } else if (raw.category === "CLOUD_IDENTITY") {
+    const isChain =
+      raw.ruleId === "IAM-CORR-001" ||
+      raw.rawMetadata?.evidenceType === "ATTACK_PATH_CHAIN";
+    evidence.push({
+      id: crypto.randomUUID(),
+      type: isChain ? "ATTACK_PATH_CHAIN" : "IAM_POLICY",
+      label: raw.filePath
+        ? `${raw.filePath}${raw.lineStart ? `:${raw.lineStart}` : ""}`
+        : isChain
+          ? "Correlated CI/CD to Cloud IAM Chain"
+          : "Static AWS IAM Policy Configuration",
+      content: redactSecretsInText(raw.codeSnippet || raw.description),
+      filePath: raw.filePath,
+      lineStart: raw.lineStart,
+      lineEnd: raw.lineEnd,
+      metadata: raw.rawMetadata
+    });
   } else if (raw.codeSnippet) {
     evidence.push({
       id: crypto.randomUUID(),
@@ -203,6 +221,25 @@ export function normalizeAndDeduplicateFindings(params: {
             }
           : undefined;
 
+      const cloudIdentityContext =
+        raw.category === "CLOUD_IDENTITY"
+          ? {
+              correlatedAttackChain:
+                raw.ruleId === "IAM-CORR-001" ||
+                raw.rawMetadata?.evidenceType === "ATTACK_PATH_CHAIN",
+              capabilityTier:
+                typeof raw.rawMetadata?.capabilityTier === "string"
+                  ? raw.rawMetadata.capabilityTier
+                  : undefined,
+              broadOidcTrust: Boolean(raw.rawMetadata?.broadOidcTrust),
+              untrustedTrigger: Boolean(raw.rawMetadata?.untrustedTrigger),
+              evidenceBasis:
+                typeof raw.rawMetadata?.evidenceBasis === "string"
+                  ? raw.rawMetadata.evidenceBasis
+                  : "STATIC_CONFIG"
+            }
+          : undefined;
+
       const risk = assessQualitativeRisk({
         category: raw.category,
         severity: raw.severity,
@@ -214,7 +251,8 @@ export function normalizeAndDeduplicateFindings(params: {
         secretType: raw.secretType,
         occurrenceCount: 1,
         intelligence,
-        cicdContext
+        cicdContext,
+        cloudIdentityContext
       });
 
       const canonical: SecurityFinding = {

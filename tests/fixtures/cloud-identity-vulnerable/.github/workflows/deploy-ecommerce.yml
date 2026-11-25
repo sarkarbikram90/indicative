@@ -1,0 +1,21 @@
+name: Deploy E-Commerce Production
+
+on:
+  pull_request_target:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS OIDC credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d4db1c34928
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/acme-ecommerce-deploy
+          aws-region: us-east-1
+      - name: Deploy artifacts
+        run: echo "deploying"

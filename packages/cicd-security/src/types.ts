@@ -120,11 +120,43 @@ export interface OidcTrustPolicy {
 export type CicdPolicyMode = "informational" | "warning" | "failure";
 
 export interface CicdPolicyConfig {
-  mode: CicdPolicyMode;
-  failOnSeverities: FindingSeverity[];
+  mode?: CicdPolicyMode;
+  failOnSeverities?: FindingSeverity[];
   disabledRules?: string[];
   allowedActionOwners?: string[];
   ignorePaths?: string[];
+  configPath?: string;
+  disableRepoConfig?: boolean;
+  baselinePath?: string;
+  nowDateIso?: string;
+}
+
+export interface SuppressedFindingRecord {
+  ruleId: string;
+  filePath?: string;
+  lineStart?: number;
+  title: string;
+  severity: FindingSeverity;
+  source: "inline" | "config-rule" | "config-suppression";
+  reason: string;
+  expires?: string;
+}
+
+export interface ExpiredSuppressionRecord {
+  ruleId: string;
+  filePath?: string;
+  lineStart?: number;
+  source: "inline" | "config-suppression";
+  reason: string;
+  expires: string;
+}
+
+export interface BaselineDiffSummary {
+  baselinePath: string;
+  baselineEntriesCount: number;
+  newFindingsCount: number;
+  existingBaselineFindingsCount: number;
+  resolvedBaselineCount: number;
 }
 
 export interface CicdPolicyEvaluation {
@@ -141,9 +173,15 @@ export interface CicdAnalysisReport {
   scannerVersion: string;
   rulesetVersion: string;
   analyzedAt: string;
+  configPath?: string;
   workflows: ParsedWorkflow[];
   oidcTrustPolicies: OidcTrustPolicy[];
   findings: RawScannerFinding[];
+  newFindings?: RawScannerFinding[];
+  baselineFindings?: RawScannerFinding[];
+  suppressedFindings: SuppressedFindingRecord[];
+  expiredSuppressions: ExpiredSuppressionRecord[];
+  baselineDiff?: BaselineDiffSummary;
   limitations: ScannerLimitation[];
   policyEvaluation: CicdPolicyEvaluation;
 }

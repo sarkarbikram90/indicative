@@ -216,4 +216,116 @@ describe("@indicative/cicd-security", () => {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it("supports .indicative.yml rule overrides, audited suppressions, inline directives, expiration enforcement, and baseline ratchet mode", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "indicative-cicd-config-"));
+    try {
+      await fs.mkdir(path.join(tmpDir, ".github", "workflows"), { recursive: true });
+      await fs.writeFile(
+        path.join(tmpDir, ".github", "workflows", "ci.yml"),
+        [
+          "name: CI",
+          "on: [push]",
+          "permissions:",
+          "  contents: write",
+          "jobs:",
+          "  build:",
+          "    runs-on: ubuntu-latest",
+          "    steps:",
+          "      # indicative-ignore: GHA-ACT-001 reason=\"internal verified mirror\" expires=2099-01-01",
+          "      - uses: actions/checkout@v4",
+          "      - run: npm install",
+          "  deploy:",
+          "    runs-on: ubuntu-latest",
+          "    steps:",
+          "      # indicative-ignore: GHA-ACT-001 reason=\"expired exception\" expires=2020-01-01",
+          "      - uses: actions/setup-node@v4"
+        ].join("\n"),
+        "utf8"
+      );
+
+      await fs.writeFile(
+        path.join(tmpDir, ".indicative.yml"),
+        [
+          "version: 1",
+          "policy: failure",
+          "rules:",
+          "  GHA-INT-002: off",
+          "  GHA-PERM-003: low",
+          "suppressions:",
+          "  - ruleId: GHA-ACT-003",
+          "    path: .github/workflows/ci.yml",
+          "    reason: \"Temporary build step requires git push credentials\"",
+          "    expires: \"2099-12-31\"",
+          "  - ruleId: GHA-ACT-001",
+          "    path: .github/workflows/ci.yml",
+          "    reason: \"Old expired config suppression\"",
+          "    expires: \"2021-01-01\""
+        ].join("\n"),
+        "utf8"
+      );
+
+      const report = await analyzeWorkspaceCicdSecurity(tmpDir, {
+        nowDateIso: "2026-11-25"
+      });
+
+      expect(report.configPath).toBe(".indicative.yml");
+      // GHA-INT-002 disabled via config rules, GHA-ACT-003 suppressed via config, first GHA-ACT-001 suppressed inline
+      expect(report.suppressedFindings.map((s) => s.ruleId)).toEqual(
+        expect.arrayContaining(["GHA-INT-002", "GHA-ACT-003", "GHA-ACT-001"])
+      );
+      // Expired inline + expired config suppression MUST be rejected and surfaced
+      expect(report.expiredSuppressions.length).toBeGreaterThanOrEqual(2);
+      expect(report.limitations.some((l) => l.code === "EXPIRED_SUPPRESSION")).toBe(true);
+      // GHA-PERM-003 downgraded to LOW via config rules (originalSeverity preserved)
+      const perm003 = report.findings.find((f) => f.ruleId === "GHA-PERM-003");
+      expect(perm003?.severity).toBe("LOW");
+      expect(perm003?.originalSeverity).toBe("HIGH");
+      // Second GHA-ACT-001 (expired inline suppression) remains active HIGH and triggers failure policy from .indicative.yml
+      expect(report.findings.some((f) => f.ruleId === "GHA-ACT-001")).toBe(true);
+      expect(report.policyEvaluation.mode).toBe("failure");
+      expect(report.policyEvaluation.passed).toBe(false);
+
+      // Baseline / differential ratchet mode: write baseline, then re-run -> 0 new findings -> passes!
+      const { writeBaselineFile } = await import("./baseline.js");
+      const baselineFile = path.join(tmpDir, ".indicative-baseline.json");
+      await writeBaselineFile(baselineFile, report.findings, report.scanner);
+
+      const ratcheted = await analyzeWorkspaceCicdSecurity(tmpDir, {
+        baselinePath: baselineFile,
+        nowDateIso: "2026-11-25"
+      });
+      expect(ratcheted.baselineDiff?.newFindingsCount).toBe(0);
+      expect(ratcheted.baselineDiff?.existingBaselineFindingsCount).toBe(report.findings.length);
+      expect(ratcheted.policyEvaluation.passed).toBe(true);
+      expect(ratcheted.policyEvaluation.exitCode).toBe(0);
+
+      // Introduce one NEW high-severity finding -> baseline ratchet catches ONLY the new finding and fails!
+      await fs.writeFile(
+        path.join(tmpDir, ".github", "workflows", "new-risk.yml"),
+        [
+          "name: New Risk",
+          "on: [push]",
+          "permissions: write-all",
+          "jobs:",
+          "  x:",
+          "    runs-on: ubuntu-latest",
+          "    steps:",
+          "      - run: echo ok"
+        ].join("\n"),
+        "utf8"
+      );
+
+      const withNewFinding = await analyzeWorkspaceCicdSecurity(tmpDir, {
+        baselinePath: baselineFile,
+        nowDateIso: "2026-11-25"
+      });
+      expect(withNewFinding.baselineDiff?.newFindingsCount).toBe(1);
+      expect(withNewFinding.newFindings?.[0]?.ruleId).toBe("GHA-PERM-002");
+      expect(withNewFinding.policyEvaluation.passed).toBe(false);
+      expect(withNewFinding.policyEvaluation.blockingFindingsCount).toBe(1);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

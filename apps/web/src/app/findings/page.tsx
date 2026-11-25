@@ -146,7 +146,7 @@ function FindingsContent() {
           className="px-2.5 py-2 rounded-lg bg-[#0d1320] border border-slate-700 text-slate-200"
         >
           <option value="">All Categories</option>
-          {["SAST", "SCA", "SECRET", "IAC", "CICD"].map((c) => (
+          {["SAST", "SCA", "SECRET", "IAC", "CICD", "CLOUD_IDENTITY"].map((c) => (
             <option key={c} value={c}>
               {c}
             </option>
@@ -161,7 +161,7 @@ function FindingsContent() {
           className="px-2.5 py-2 rounded-lg bg-[#0d1320] border border-slate-700 text-slate-200"
         >
           <option value="">All Scanners</option>
-          {["semgrep", "trivy", "gitleaks", "cicd-github-actions"].map((s) => (
+          {["semgrep", "trivy", "gitleaks", "cicd-github-actions", "cloud-identity-iam"].map((s) => (
             <option key={s} value={s}>
               {s}
             </option>

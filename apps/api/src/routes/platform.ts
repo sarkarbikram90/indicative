@@ -242,7 +242,8 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
       SCA: openFindings.filter((f) => f.category === "SCA").length,
       SECRET: openFindings.filter((f) => f.category === "SECRET").length,
       IAC: openFindings.filter((f) => f.category === "IAC").length,
-      CICD: openFindings.filter((f) => f.category === "CICD").length
+      CICD: openFindings.filter((f) => f.category === "CICD").length,
+      CLOUD_IDENTITY: openFindings.filter((f) => f.category === "CLOUD_IDENTITY").length
     };
 
     const scanners = await deps.db.select().from(scannerMetadata);

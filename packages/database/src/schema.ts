@@ -215,7 +215,7 @@ export const scans = pgTable(
     requestedScanners: jsonb("requested_scanners")
       .$type<string[]>()
       .notNull()
-      .default(["semgrep", "trivy", "gitleaks", "cicd-github-actions"]),
+      .default(["semgrep", "trivy", "gitleaks", "cicd-github-actions", "cloud-identity-iam"]),
     runAiAnalysis: boolean("run_ai_analysis").notNull().default(false),
     isDemoScan: boolean("is_demo_scan").notNull().default(false),
     summaryCounts: jsonb("summary_counts").$type<Record<string, number>>().notNull().default({}),
@@ -571,7 +571,7 @@ export const scanSchedules = pgTable(
     scanners: jsonb("scanners")
       .$type<string[]>()
       .notNull()
-      .default(["semgrep", "trivy", "gitleaks", "cicd-github-actions"]),
+      .default(["semgrep", "trivy", "gitleaks", "cicd-github-actions", "cloud-identity-iam"]),
     runAiAnalysis: boolean("run_ai_analysis").notNull().default(false),
     enabled: boolean("enabled").notNull().default(true),
     lastRunAt: timestamp("last_run_at", { withTimezone: true }),

@@ -45,8 +45,8 @@ function parseCronField(
       throw new Error(`INVALID_CRON: Invalid step "${stepPart}" in ${label} "${token}".`);
     }
 
-    let start = min;
-    let end = max;
+    let start: number;
+    let end: number;
     if (rangePart === "*") {
       start = min;
       end = max;

@@ -120,7 +120,6 @@ export default function AutomationsPage() {
 
   useEffect(() => {
     void refreshAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleCreateSchedule(e: React.FormEvent) {

@@ -1,0 +1,28 @@
+{
+  "name": "@indicative/cloud-identity",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "indicative-cloud-identity": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@indicative/cicd-security": "0.1.0",
+    "@indicative/contracts": "0.1.0",
+    "@indicative/security": "0.1.0",
+    "yaml": "^2.9.1",
+    "zod": "^3.24.2"
+  }
+}

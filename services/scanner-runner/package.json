@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@indicative/cicd-security": "0.1.0",
+    "@indicative/cloud-identity": "0.1.0",
     "@indicative/config": "0.1.0",
     "@indicative/contracts": "0.1.0",
     "@indicative/scanners": "0.1.0",

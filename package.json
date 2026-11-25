@@ -14,10 +14,14 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "npm --workspace @indicative/config run build && npm --workspace @indicative/contracts run build && npm --workspace @indicative/security run build && npm --workspace @indicative/shared run build && npm --workspace @indicative/database run build && npm --workspace @indicative/scanners run build && npm --workspace @indicative/cicd-security run build && npm --workspace @indicative/findings run build && npm --workspace @indicative/ai run build && npm --workspace @indicative/scanner-runner run build && npm --workspace @indicative/worker run build && npm --workspace @indicative/api run build && npm --workspace @indicative/web run build",
+    "build": "npm --workspace @indicative/config run build && npm --workspace @indicative/contracts run build && npm --workspace @indicative/security run build && npm --workspace @indicative/shared run build && npm --workspace @indicative/database run build && npm --workspace @indicative/scanners run build && npm --workspace @indicative/cicd-security run build && npm --workspace @indicative/cloud-identity run build && npm --workspace @indicative/findings run build && npm --workspace @indicative/ai run build && npm --workspace @indicative/scanner-runner run build && npm --workspace @indicative/worker run build && npm --workspace @indicative/api run build && npm --workspace @indicative/web run build",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "npm run typecheck",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "bundle:action": "node scripts/bundle-action.mjs",
     "scan:cicd": "tsx packages/cicd-security/src/cli.ts",
+    "scan:cloud-identity": "tsx packages/cloud-identity/src/cli.ts",
     "dev:api": "npm --workspace @indicative/api run dev",
     "dev:worker": "npm --workspace @indicative/worker run dev",
     "dev:runner": "npm --workspace @indicative/scanner-runner run dev",
@@ -32,9 +36,14 @@
     "test:regression": "vitest run tests/regression"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.10.2",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.15.0",
+    "prettier": "^3.10.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.74.0",
     "vitest": "^2.1.8"
   }
 }

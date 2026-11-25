@@ -33,11 +33,15 @@ jobs:
       - name: Build all workspaces (topological order)
         run: npm run build
 
-      - name: Strict TypeScript typecheck
-        run: npm run typecheck
+      - name: Strict TypeScript typecheck & ESLint
+        run: |
+          npm run typecheck
+          npm run lint
 
-      - name: Run unit, integration, security & CI/CD regression tests
-        run: npx vitest run packages/ai packages/cicd-security packages/findings packages/security tests/integration tests/security tests/regression/cicd-corpus-benchmark.test.ts
+      - name: Run unit, integration, security & CI/CD + Cloud Identity regression tests
+        run: npx vitest run packages/ai packages/cicd-security packages/cloud-identity packages/findings packages/security tests/integration tests/security tests/regression/cicd-corpus-benchmark.test.ts tests/regression/cloud-identity-corpus-benchmark.test.ts
 
-      - name: Dogfood Indicative CI/CD & OIDC Security Analyzer against this repository
-        run: npm run scan:cicd -- . --ignore tests/fixtures --format markdown --sarif-file .indicative-ci.sarif --policy failure
+      - name: Dogfood Indicative CI/CD & Cloud Identity Analyzers against this repository
+        run: |
+          npm run scan:cicd -- . --format markdown --sarif-file .indicative-ci.sarif --policy failure
+          npm run scan:cloud-identity -- . --ignore tests/fixtures --format markdown --policy failure

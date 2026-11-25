@@ -26,6 +26,7 @@ interface DashboardData {
     SECRET: number;
     IAC: number;
     CICD?: number;
+    CLOUD_IDENTITY?: number;
   };
   recentScans: Array<{
     id: string;
@@ -170,8 +171,8 @@ function DashboardView() {
 
         <div className="p-5 rounded-xl bg-[#111827] border border-slate-800 space-y-4">
           <h2 className="text-sm font-semibold text-white">Open Findings by Category</h2>
-          <div className="grid grid-cols-5 gap-3">
-            {(["SAST", "SCA", "SECRET", "IAC", "CICD"] as const).map((cat) => (
+          <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+            {(["SAST", "SCA", "SECRET", "IAC", "CICD", "CLOUD_IDENTITY"] as const).map((cat) => (
               <div
                 key={cat}
                 className="p-3 rounded-lg bg-[#0d1320] border border-slate-800/80 text-center"

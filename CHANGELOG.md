@@ -2,7 +2,24 @@
 
 All notable changes to **Indicative** are documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — `0.2.0-dev`
+## [Unreleased] — `0.3.0-dev`
+
+### Added
+- **Repository Config, Audited Suppressions & Baseline Ratchet Mode (`@indicative/cicd-security`):**
+  - Strict Zod-validated `.indicative.yml` / `.indicative.yaml` / `.indicative.json` configuration (`policy`, `failOnSeverities`, `ignore`, per-rule severity overrides or `off`, and scoped `suppressions` with required `reason` and optional `expires`).
+  - Inline YAML/IaC suppression comments (`# indicative-ignore: RULE-ID reason="..." expires=YYYY-MM-DD`) with strict expiration enforcement (expired suppressions are rejected and surfaced as `EXPIRED_SUPPRESSION` limitations).
+  - Baseline / differential ratchet mode (`--write-baseline`, `--baseline`) using stable line-number-independent finding keys so teams can gate CI strictly on newly introduced findings.
+- **Open-Source Distribution, Tooling & Release Infrastructure:**
+  - Pre-bundled standalone Action CLI (`scripts/bundle-action.mjs` → `action-dist/cicd-cli.cjs`) for instant zero-install execution in `action.yml`, plus new `config` / `baseline` inputs and `new-findings-count` / `suppressed-count` outputs.
+  - Hardened tag-triggered release workflow (`.github/workflows/release.yml`) publishing signed/attested GHCR images (`api`, `web`, `worker`, `scanner-runner`) and GitHub Releases with SHA-256 checksums.
+  - `.pre-commit-hooks.yaml`, `.github/dependabot.yml`, ESLint 9 flat config (`eslint.config.mjs`), Prettier (`.prettierrc.json`), and dogfooded root `.indicative.yml`.
+- **Static Cloud Identity & AWS IAM Risk Intelligence (`@indicative/cloud-identity`, `v0.3.0-dev`):**
+  - Workflow cloud-identity reference extractor (`aws-actions/configure-aws-credentials` `role-to-assume`, `azure/login` `client-id`, `google-github-actions/auth` `workload_identity_provider`).
+  - Offline static AWS IAM parser for Terraform HCL (`.tf` including cross-file `aws_iam_role`, `aws_iam_role_policy`, `aws_iam_role_policy_attachment`, `aws_iam_policy`, `data "aws_iam_policy_document"`), CloudFormation (`.yml`/`.yaml`/`.json`), and standalone IAM Policy JSON.
+  - 8 versioned, documented rules (`indicative-cloud-iam-v1.0.0`, `rules/cloud-identity/aws-iam/README.md`) covering Admin access (`IAM-ADMIN-001`), broad service wildcards (`IAM-PERM-001`), `NotAction`/`NotResource` Allow (`IAM-PERM-002`), sensitive secret/KMS/S3 wildcard read (`IAM-DATA-001`), IAM mutation & `iam:PassRole` privilege escalation (`IAM-ESC-001`), unrestricted `sts:AssumeRole` (`IAM-ESC-002`), missing `permissions_boundary` (`IAM-BOUND-001`), and cross-file GitHub Actions → OIDC → AWS IAM attack-chain correlation (`IAM-CORR-001`) with explicit `UNKNOWN` runtime control disclosures.
+  - End-to-end integration via `CloudIdentityIamAdapter` (`cloud-identity-iam`, category `CLOUD_IDENTITY`) in `scanner-runner`, canonical fingerprinting, prioritization, API/UI breakdowns, standalone CLI (`npm run scan:cloud-identity`), and vulnerable/hardened regression corpora (`8/8` TP, `0` FP).
+
+## [0.2.0-dev]
 
 ### Added
 - **CI/CD & OIDC Federation Security Intelligence (`@indicative/cicd-security`):**

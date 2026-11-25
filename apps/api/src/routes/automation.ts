@@ -355,8 +355,8 @@ export function registerAutomationRoutes(
       }
 
       const allowHttpInTest = deps.config.NODE_ENV === "test";
-      let publicConfig: Record<string, unknown> = {};
-      let secretPayload: Record<string, unknown> = {};
+      let publicConfig: Record<string, unknown>;
+      let secretPayload: Record<string, unknown>;
 
       try {
         if (data.channelType === "SLACK") {

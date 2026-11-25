@@ -1,0 +1,12 @@
+# Indicative Repository Security Configuration
+# Docs: https://github.com/sarkarbikram90/indicative
+version: 1
+policy: failure
+failOnSeverities:
+  - CRITICAL
+  - HIGH
+ignore:
+  - tests/fixtures
+  - action-dist
+rules: {}
+suppressions: []

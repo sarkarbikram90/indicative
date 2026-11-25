@@ -1,0 +1,24 @@
+name: Deploy E-Commerce Production (Hardened)
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Configure AWS OIDC credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d4db1c34928
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/acme-ecommerce-scoped-deploy
+          aws-region: us-east-1
+      - name: Upload static bundle
+        run: echo "uploading scoped artifact"

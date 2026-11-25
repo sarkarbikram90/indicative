@@ -1,0 +1,13 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+  LegacyBuildPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyName: legacy-notaction-allow
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            NotAction:
+              - "iam:DeleteAccountAlias"
+            Resource: "*"

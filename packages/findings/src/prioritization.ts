@@ -25,6 +25,13 @@ export interface RiskPrioritizationInput {
     correlatedOidcTrust?: boolean;
     evidenceBasis?: string;
   };
+  cloudIdentityContext?: {
+    correlatedAttackChain?: boolean;
+    capabilityTier?: string;
+    broadOidcTrust?: boolean;
+    untrustedTrigger?: boolean;
+    evidenceBasis?: string;
+  };
 }
 
 export interface RiskPrioritizationOutput {
@@ -106,6 +113,25 @@ export function assessQualitativeRisk(
         "[UNKNOWN] Repository-level GitHub default GITHUB_TOKEN settings and branch/environment protection rules cannot be verified statically."
       );
     }
+  }
+
+  if (input.category === "CLOUD_IDENTITY") {
+    rationale.push(
+      `[VERIFIED] Evidence basis: ${input.cloudIdentityContext?.evidenceBasis ?? "STATIC_CONFIG"} (static AWS IAM policy & workflow identity correlation).`
+    );
+    if (input.cloudIdentityContext?.capabilityTier) {
+      rationale.push(
+        `[VERIFIED] Static IAM role capability classification: ${input.cloudIdentityContext.capabilityTier}.`
+      );
+    }
+    if (input.cloudIdentityContext?.correlatedAttackChain) {
+      rationale.push(
+        "[INFERRED] Cross-file static correlation links a CI/CD workflow identity reference to an over-privileged AWS IAM role."
+      );
+    }
+    rationale.push(
+      "[UNKNOWN] Account-level AWS SCPs, out-of-band Permission Boundaries, live IAM drift, and GitHub branch/environment approval gates are not statically verifiable."
+    );
   }
 
   if (typeof input.cvssScore === "number") {
@@ -205,6 +231,15 @@ export function assessQualitativeRisk(
     if (
       (input.cicdContext?.untrustedTrigger && input.cicdContext?.hasWritePermissions) ||
       input.cicdContext?.correlatedOidcTrust
+    ) {
+      priority = elevatePriority(priority, "IMMEDIATE");
+    }
+  }
+
+  if (input.category === "CLOUD_IDENTITY") {
+    if (
+      input.cloudIdentityContext?.correlatedAttackChain &&
+      (input.severity === "CRITICAL" || input.cloudIdentityContext.broadOidcTrust)
     ) {
       priority = elevatePriority(priority, "IMMEDIATE");
     }

@@ -1,0 +1,158 @@
+name: Indicative Release & Container Publish
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Verify build and bundle without publishing images or GitHub Release"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-bundle:
+    name: Verify Build, Tests & Bundle Standalone Action CLI
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@39370e3970a6d050c480ffad7ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies (lockfile-enforced)
+        run: npm ci
+
+      - name: Build all workspaces
+        run: npm run build
+
+      - name: Typecheck & lint
+        run: |
+          npm run typecheck
+          npm run lint
+
+      - name: Run automated verification suite
+        run: npx vitest run packages/ai packages/cicd-security packages/cloud-identity packages/findings packages/security tests/integration tests/security tests/regression/cicd-corpus-benchmark.test.ts tests/regression/cloud-identity-corpus-benchmark.test.ts
+
+      - name: Bundle standalone Action CLI & verify self-scan
+        run: |
+          npm run bundle:action
+          node action-dist/cicd-cli.cjs . --format markdown --policy failure
+
+      - name: Upload bundled CLI artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: indicative-action-bundle
+          path: action-dist/cicd-cli.cjs
+          retention-days: 7
+
+  publish-images:
+    name: Build & Publish GHCR Container Images
+    needs: [verify-and-bundle]
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.dry_run == false }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api
+            dockerfile: infrastructure/docker/Dockerfile.node
+            target: api
+          - service: worker
+            dockerfile: infrastructure/docker/Dockerfile.node
+            target: worker
+          - service: web
+            dockerfile: infrastructure/docker/Dockerfile.web
+            target: ""
+          - service: scanner-runner
+            dockerfile: infrastructure/docker/Dockerfile.scanner-runner
+            target: ""
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker image metadata
+        id: meta
+        uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96 # v5.6.1
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/indicative-${{ matrix.service }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+
+      - name: Build and push container image
+        id: build
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          push: true
+          sbom: true
+          provenance: mode=max
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Generate build provenance attestation
+        uses: actions/attest-build-provenance@1c608d11d69870c2092266b3f9a6f3abbf17002c # v1.4.3
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/indicative-${{ matrix.service }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  create-release:
+    name: Create GitHub Release
+    needs: [verify-and-bundle, publish-images]
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download bundled CLI artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: indicative-action-bundle
+          path: release-assets
+
+      - name: Generate SHA-256 checksum
+        run: |
+          cd release-assets
+          sha256sum cicd-cli.cjs > SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 # v2.0.8
+        with:
+          generate_release_notes: true
+          files: |
+            release-assets/cicd-cli.cjs
+            release-assets/SHA256SUMS.txt

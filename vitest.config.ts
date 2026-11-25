@@ -24,6 +24,7 @@ export default defineConfig({
       "@indicative/database": path.resolve(__dirname, "packages/database/src/index.ts"),
       "@indicative/scanners": path.resolve(__dirname, "packages/scanners/src/index.ts"),
       "@indicative/cicd-security": path.resolve(__dirname, "packages/cicd-security/src/index.ts"),
+      "@indicative/cloud-identity": path.resolve(__dirname, "packages/cloud-identity/src/index.ts"),
       "@indicative/findings": path.resolve(__dirname, "packages/findings/src/index.ts"),
       "@indicative/ai": path.resolve(__dirname, "packages/ai/src/index.ts"),
       "@indicative/scanner-runner": path.resolve(__dirname, "services/scanner-runner/src/index.ts"),

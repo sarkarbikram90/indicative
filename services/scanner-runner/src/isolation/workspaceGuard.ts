@@ -35,7 +35,7 @@ export async function inspectAndSanitizeScanWorkspace(params: {
     maxFiles: params.limits.maxFilesPerScan
   });
 
-  let hasGitHistory = false;
+  let hasGitHistory: boolean;
   let isShallowClone = false;
   try {
     const gitDir = path.join(validatedPath, ".git");

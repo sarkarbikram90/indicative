@@ -103,6 +103,7 @@ export async function sanitizeUntrustedWorkspace(
       // Flag suspicious filenames (option injection, control chars, shell metachars)
       if (
         entry.name.startsWith("-") ||
+        // eslint-disable-next-line no-control-regex
         /[\x00-\x1f\x7f;|$`<>]/.test(entry.name)
       ) {
         report.suspiciousFilenames.push(relPath);

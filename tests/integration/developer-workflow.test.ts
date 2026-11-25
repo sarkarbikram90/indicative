@@ -51,7 +51,7 @@ describe("Integration: Developer Workflow & Automation (Webhooks, PR/Check Runs,
 
   const githubCalls: Array<{ method: string; url: string; body?: unknown }> = [];
   const outboundNotificationCalls: Array<{ method: string; url: string; body?: unknown }> = [];
-  let createdCheckRunId = 7001;
+  const createdCheckRunId = 7001;
   let existingPrCommentId: number | null = null;
 
   beforeAll(async () => {

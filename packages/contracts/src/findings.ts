@@ -1,6 +1,13 @@
 import { z } from "zod";
 
-export const FindingCategorySchema = z.enum(["SAST", "SCA", "SECRET", "IAC", "CICD"]);
+export const FindingCategorySchema = z.enum([
+  "SAST",
+  "SCA",
+  "SECRET",
+  "IAC",
+  "CICD",
+  "CLOUD_IDENTITY"
+]);
 export type FindingCategory = z.infer<typeof FindingCategorySchema>;
 
 export const FindingSeveritySchema = z.enum([
@@ -61,7 +68,9 @@ export const FindingEvidenceSchema = z.object({
     "GIT_COMMIT",
     "SCANNER_REFERENCE",
     "WORKFLOW_CONFIG",
-    "OIDC_TRUST_POLICY"
+    "OIDC_TRUST_POLICY",
+    "IAM_POLICY",
+    "ATTACK_PATH_CHAIN"
   ]),
   label: z.string(),
   content: z.string(),

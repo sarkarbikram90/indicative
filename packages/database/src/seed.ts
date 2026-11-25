@@ -62,6 +62,14 @@ export async function seedDatabase(
       license: "Apache-2.0",
       capabilities: ["cicd"],
       healthy: true
+    },
+    {
+      scanner: "cloud-identity-iam",
+      version: "1.0.0",
+      rulesetVersion: "indicative-cloud-iam-v1.0.0",
+      license: "Apache-2.0",
+      capabilities: ["cloud-identity"],
+      healthy: true
     }
   ];
 

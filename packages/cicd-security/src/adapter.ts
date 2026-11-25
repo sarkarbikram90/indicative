@@ -12,6 +12,8 @@ import {
   normalizeRepoRelativePath,
   validateSafePathWithinRoot
 } from "@indicative/security";
+import { diffFindingsAgainstBaseline, readBaselineFile } from "./baseline.js";
+import { applyConfigAndSuppressions, loadIndicativeRepoConfig } from "./config.js";
 import {
   analyzeStructuredOidcPolicies,
   analyzeTerraformOidcPolicies
@@ -109,6 +111,43 @@ export async function analyzeWorkspaceCicdSecurity(
   const workflows: ParsedWorkflow[] = [];
   const oidcTrustPolicies: OidcTrustPolicy[] = [];
   const limitations: ScannerLimitation[] = [];
+  const fileLinesByPath = new Map<string, string[]>();
+
+  // 0. Load optional .indicative.yml / .indicative.yaml / .indicative.json
+  const loadedConfig = policy.disableRepoConfig
+    ? { config: null }
+    : await loadIndicativeRepoConfig(resolvedRoot, policy.configPath);
+  if (loadedConfig.error) {
+    limitations.push({
+      code: "INDICATIVE_CONFIG_ERROR",
+      message: loadedConfig.error,
+      scopeAffected: policy.configPath ?? ".indicative.yml"
+    });
+  }
+  const repoConfig = loadedConfig.config;
+
+  const effectivePolicy: CicdPolicyConfig = {
+    ...policy,
+    mode: policy.mode ?? repoConfig?.policy ?? DEFAULT_CICD_POLICY.mode,
+    failOnSeverities:
+      policy.failOnSeverities && policy.failOnSeverities.length > 0
+        ? policy.failOnSeverities
+        : (repoConfig?.failOnSeverities ?? DEFAULT_CICD_POLICY.failOnSeverities),
+    ignorePaths: [...(repoConfig?.ignore ?? []), ...(policy.ignorePaths ?? [])],
+    baselinePath:
+      policy.baselinePath ??
+      (repoConfig?.baseline ? path.resolve(resolvedRoot, repoConfig.baseline) : undefined)
+  };
+
+  const normalizedIgnorePrefixes = (effectivePolicy.ignorePaths ?? [])
+    .map((p) => p.replace(/\\/g, "/").replace(/^\/+|\/+$/g, ""))
+    .filter(Boolean);
+  const isIgnored = (relPath: string): boolean => {
+    const clean = relPath.replace(/\\/g, "/");
+    return normalizedIgnorePrefixes.some(
+      (prefix) => clean === prefix || clean.startsWith(`${prefix}/`)
+    );
+  };
 
   // 1. Discover .github/workflows/**/*.{yml,yaml}
   const workflowsDir = path.join(resolvedRoot, ".github", "workflows");
@@ -121,7 +160,7 @@ export async function analyzeWorkspaceCicdSecurity(
       await collectFilesRecursive(
         resolvedRoot,
         workflowsDir,
-        (rel) => /\.(?:yml|yaml)$/i.test(rel),
+        (rel) => /\.(?:yml|yaml)$/i.test(rel) && !isIgnored(rel),
         MAX_WORKFLOW_FILES,
         workflowFiles,
         wfState
@@ -151,6 +190,7 @@ export async function analyzeWorkspaceCicdSecurity(
         continue;
       }
       const content = await fs.readFile(wfFile.fullPath, "utf8");
+      fileLinesByPath.set(wfFile.relPath.replace(/\\/g, "/"), content.split(/\r?\n/));
       const parsed = parseGitHubWorkflowYaml(wfFile.relPath, content);
       if (parsed.error || !parsed.workflow) {
         limitations.push({
@@ -170,16 +210,6 @@ export async function analyzeWorkspaceCicdSecurity(
     }
   }
 
-  const normalizedIgnorePrefixes = (policy.ignorePaths ?? [])
-    .map((p) => p.replace(/\\/g, "/").replace(/^\/+|\/+$/g, ""))
-    .filter(Boolean);
-  const isIgnored = (relPath: string): boolean => {
-    const clean = relPath.replace(/\\/g, "/");
-    return normalizedIgnorePrefixes.some(
-      (prefix) => clean === prefix || clean.startsWith(`${prefix}/`)
-    );
-  };
-
   // 2. Discover static cloud OIDC trust policies (.tf, CloudFormation/IAM .json/.yaml/.yml)
   const iacFiles: Array<{ fullPath: string; relPath: string }> = [];
   const iacState = { truncated: false };
@@ -191,7 +221,12 @@ export async function analyzeWorkspaceCicdSecurity(
       if (isIgnored(rel)) return false;
       if (lower.startsWith(".github/workflows/")) return false;
       if (lower.endsWith("package-lock.json") || lower.endsWith("tsconfig.json")) return false;
-      return lower.endsWith(".tf") || lower.endsWith(".json") || lower.endsWith(".yaml") || lower.endsWith(".yml");
+      return (
+        lower.endsWith(".tf") ||
+        lower.endsWith(".json") ||
+        lower.endsWith(".yaml") ||
+        lower.endsWith(".yml")
+      );
     },
     MAX_IAC_FILES,
     iacFiles,
@@ -205,6 +240,7 @@ export async function analyzeWorkspaceCicdSecurity(
       const content = await fs.readFile(iacFile.fullPath, "utf8");
       if (!content.includes("token.actions.githubusercontent.com")) continue;
 
+      fileLinesByPath.set(iacFile.relPath.replace(/\\/g, "/"), content.split(/\r?\n/));
       if (iacFile.relPath.toLowerCase().endsWith(".tf")) {
         oidcTrustPolicies.push(...analyzeTerraformOidcPolicies(iacFile.relPath, content));
       } else {
@@ -215,22 +251,71 @@ export async function analyzeWorkspaceCicdSecurity(
     }
   }
 
-  const findings = evaluateCicdSecurityRules({
+  const rawFindings = evaluateCicdSecurityRules({
     workflows,
     oidcTrustPolicies,
-    disabledRules: policy.disabledRules
+    disabledRules: effectivePolicy.disabledRules
   });
 
-  const policyEvaluation = evaluateCicdPolicy(findings, policy);
+  // 3. Apply .indicative.yml rules/suppressions & inline comments
+  const { activeFindings, suppressedFindings, expiredSuppressions } =
+    applyConfigAndSuppressions({
+      findings: rawFindings,
+      fileLinesByPath,
+      config: repoConfig,
+      nowDateIso: effectivePolicy.nowDateIso
+    });
+
+  for (const exp of expiredSuppressions) {
+    limitations.push({
+      code: "EXPIRED_SUPPRESSION",
+      message: `Suppression for ${exp.ruleId} (${exp.filePath ?? "repo"}) expired on ${exp.expires} and was NOT applied (reason: ${exp.reason}).`,
+      scopeAffected: exp.filePath
+    });
+  }
+
+  // 4. Optional Baseline / Differential Ratchet Mode
+  let baselineDiff;
+  let newFindings;
+  let baselineFindings;
+  let findingsForPolicy = activeFindings;
+
+  if (effectivePolicy.baselinePath) {
+    try {
+      const baseline = await readBaselineFile(effectivePolicy.baselinePath);
+      const relBaseline =
+        path.relative(resolvedRoot, effectivePolicy.baselinePath).replace(/\\/g, "/") ||
+        effectivePolicy.baselinePath;
+      const diff = diffFindingsAgainstBaseline(activeFindings, baseline, relBaseline);
+      baselineDiff = diff.summary;
+      newFindings = diff.newFindings;
+      baselineFindings = diff.baselineFindings;
+      findingsForPolicy = diff.newFindings;
+    } catch (err) {
+      limitations.push({
+        code: "BASELINE_LOAD_ERROR",
+        message: `Unable to load baseline file "${effectivePolicy.baselinePath}": ${(err as Error).message}`,
+        scopeAffected: effectivePolicy.baselinePath
+      });
+    }
+  }
+
+  const policyEvaluation = evaluateCicdPolicy(findingsForPolicy, effectivePolicy);
 
   return {
     scanner: CICD_SCANNER_NAME,
     scannerVersion: CICD_SCANNER_VERSION,
     rulesetVersion: CICD_RULESET_VERSION,
     analyzedAt: new Date().toISOString(),
+    configPath: repoConfig?.configPath,
     workflows,
     oidcTrustPolicies,
-    findings,
+    findings: activeFindings,
+    newFindings,
+    baselineFindings,
+    suppressedFindings,
+    expiredSuppressions,
+    baselineDiff,
     limitations,
     policyEvaluation
   };
