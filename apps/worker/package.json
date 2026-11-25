@@ -27,7 +27,7 @@
     "@indicative/scanners": "0.1.0",
     "@indicative/security": "0.1.0",
     "@indicative/shared": "0.1.0",
-    "bullmq": "^5.34.3",
+    "bullmq": "^6.7.8",
     "drizzle-orm": "^0.38.3",
     "ioredis": "^5.4.2"
   }
