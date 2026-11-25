@@ -66,5 +66,28 @@ This file records key engineering decisions made for the Indicative MVP, capturi
 
 ## ADR-013 — Documentation Reflects Verified Implementation
 - **Context:** Architecture docs easily drift into unverified claims.
-- **Decision:** Keep all docs synchronized with actual code, pinned scanner versions, and measured test/benchmark results, clearly separating implemented MVP features from planned post-MVP hardening.
-- **Consequences:** Every documented claim is backed by executable code and automated tests.
+- **Decision:** Keep all docs synchronized with actual code, pinned scanner versions, and measured test/benchmark results, clearly separating implemented features from planned milestones.
+- **Consequences:** Every documented claim is backed by executable code and automated tests, and planned architecture specs are explicitly tagged as planned.
+
+## ADR-014 — Unified Three-Pillar Cross-Boundary Security Model (Code × CI/CD × Cloud Identity)
+- **Context:** Standalone SAST/SCA/Secrets scanners, workflow linters, and CSPM tools each have strong incumbents; isolated alert lists fail to show how application flaws, insecure GitHub Actions workflows, broad OIDC trust policies, and over-privileged cloud IAM roles combine into production compromise paths.
+- **Decision:** Anchor Indicative's 12-month product architecture on connecting three boundaries — Application Security Intelligence, CI/CD Security Intelligence, and Cloud Identity Risk — into one evidence-backed correlation layer, built sequentially in verified vertical slices rather than simultaneously.
+- **Consequences:** Focuses engineering investment on cross-boundary correlation (OIDC/IAM linking, attack-path intelligence, reachability) rather than duplicating point-tool checklists.
+
+## ADR-015 — PostgreSQL-Backed Typed Security Context Graph with Per-Hop Provenance & Uncertainty
+- **Context:** Attack-path correlation requires traversing relationships (`Repository → Workflow → OIDC Trust → IAM Role → Cloud Resource`) across multi-tenant organizations, while remaining practical to self-host via Docker Compose without operating a separate graph database cluster (e.g., Neo4j). Additionally, black-box attack-path tools erode practitioner trust when they hide unverified assumptions.
+- **Decision:** Store typed entities, typed edges, and materialized attack paths in PostgreSQL 16 (`security_entities`, `security_edges`, `attack_paths`, `attack_path_steps`, strictly tenant-scoped by `organization_id`) using recursive CTEs for bounded 2–6 hop traversals. Require every edge to record `evidence_basis` (`VERIFIED_STATIC`, `VERIFIED_RUNTIME`, `INFERRED`, `UNKNOWN`), source file/line provenance, and explicit `unknown_controls` caveats (e.g., GitHub branch protection, environment approval gates, AWS SCPs, Permission Boundaries).
+- **Consequences:** Zero extra database infrastructure for self-hosted teams, strict relational tenant isolation, and transparent, auditable attack paths where path confidence is bounded by the weakest hop.
+
+## ADR-016 — Hybrid Static-First CI/CD & Cloud Identity Architecture with Segregated Live Verification
+- **Context:** Detecting workflow-to-cloud privilege risks requires both deep GitHub Actions analysis and cloud IAM policy evaluation, while preserving Indicative's zero-egress, zero-credential `scanner-runner` trust boundary (ADR-006).
+- **Decision:**
+  1. Keep `@indicative/cicd-security` as the native AST structural extractor for workflows and OIDC trust policies, while permitting optional pinned external `ScannerAdapter`s (`zizmor`, `actionlint`) inside `services/scanner-runner` with cross-engine canonical deduplication.
+  2. Build static AWS IAM policy & privilege-escalation analysis (`packages/cloud-identity`) over IaC/JSON first so full code-to-IAM paths work offline with zero cloud credentials.
+  3. Defer optional read-only live cloud/SCM verification (`v0.6.0`) to a strictly segregated, opt-in control-plane connector — never granting live cloud or GitHub credentials to `scanner-runner`.
+- **Consequences:** Preserves air-gapped untrusted-code isolation, delivers immediate offline value on IaC repositories, and creates a clean upgrade path from `STATIC_CONFIG` to `VERIFIED_RUNTIME` evidence.
+
+## ADR-017 — Modeling AI Agents & MCP Servers as Non-Human Identities (NHIs) on the Shared Graph
+- **Context:** AI coding assistants, autonomous agents, and MCP servers increasingly hold delegated credentials and execute actions across repositories, CI/CD pipelines, and cloud infrastructure. Building an isolated "AI security" bolt-on would fragment identity visibility.
+- **Decision:** Model AI agents and MCP servers as first-class Non-Human Identity nodes (`AI_AGENT`, `MCP_SERVER`) on Indicative's shared Security Context Graph (`v0.7.0`), beginning with deterministic static analysis of MCP/agent manifests, credential bindings, and tool scopes aligned with OWASP ASI and OWASP MCP Top 10.
+- **Consequences:** Reuses existing secret-safety, canonical finding lifecycle, and graph-traversal infrastructure to answer over-privileged agent questions with the same evidence and uncertainty guarantees as CI/CD and cloud identities.

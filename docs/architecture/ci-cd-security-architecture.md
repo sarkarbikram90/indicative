@@ -129,3 +129,12 @@ Rule documentation is also maintained under `rules/cicd/github-actions/README.md
   - Analyzed workflow files, triggers, permissions, third-party actions, OIDC references, and correlated cloud trust policies.
   - Filtered CI/CD findings grouped by rule category with direct links to Finding Detail pages.
   - Clear labeling that OIDC trust checks reflect **static repository configuration** (`STATIC_CONFIG`), not live cloud API verification.
+
+---
+
+## 7. Planned Evolution into Cross-Domain Identity & Attack-Path Intelligence (`v0.3.0`–`v0.4.0`)
+
+As detailed in [Cross-Domain Attack-Path, Cloud Identity & NHI Architecture](./attack-path-and-identity-architecture.md):
+1. **Structural Graph Extraction:** `@indicative/cicd-security` will remain Indicative's authoritative AST extractor for emitting typed `Workflow`, `WorkflowJob`, `ThirdPartyAction`, and `OidcTrustPolicy` entities — including concrete workflow identity targets (`role-to-assume`, `client-id`, `workload_identity_provider`) — into `packages/context-graph`.
+2. **Complementary External Adapters (`zizmor` / `actionlint`):** Optional pinned adapters inside `services/scanner-runner` can augment Indicative's native rules for deep GitHub Actions edge cases (cache/artifact poisoning, impostor commits, expression type checking) with canonical cross-engine deduplication.
+3. **Cloud IAM Authorization Handoff:** Static OIDC trust policies extracted here will link directly to `packages/cloud-identity` (`v0.3.0`) to combine *"who can assume this role"* (trust policy) with *"what this role can do"* (IAM permissions & privilege-escalation paths).

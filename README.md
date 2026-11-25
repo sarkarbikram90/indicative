@@ -16,7 +16,7 @@
 
 | Milestone | Area | Status |
 |---|---|---|
-| Core Platform (`v0.1.0`) | Modular TypeScript monorepo, PostgreSQL 16 (19 tables), Fastify 5 API + OpenAPI 3.1, Redis/BullMQ, GitHub OAuth & App, Next.js 15 UI | ✅ Verified |
+| Core Platform (`v0.1.0`) | Modular TypeScript monorepo, PostgreSQL 16 (23 tables in `v0.2.0-dev`), Fastify 5 API + OpenAPI 3.1, Redis/BullMQ, GitHub OAuth & App, Next.js 15 UI | ✅ Verified |
 | Core Scanners (`v0.1.0`) | Isolated `scanner-runner` + pinned Semgrep CE `1.186.0`, Trivy `0.76.2` (with offline DB freshness checks), Gitleaks `8.30.1` (working tree + Git history) | ✅ Verified |
 | Secret & Verification Integrity (`v0.1.0`) | Tenant-keyed `HKDF+HMAC-SHA256` fingerprinting, linear-time PEM scrubbing, chunked redaction, honest `NOT_VERIFIED` credential status & `VERIFICATION_INCONCLUSIVE` failure transparency | ✅ Verified |
 | Contextual Intelligence (`v0.2.0`) | Offline-capable CISA KEV + FIRST EPSS enrichment with explicit source/observation provenance and `[VERIFIED]` / `[INFERRED]` / `[UNKNOWN]` risk rationale | ✅ Verified |
@@ -43,7 +43,7 @@ indicative/
 │   ├── contracts/              # Shared TypeScript & Zod schemas across services (SAST, SCA, SECRET, IAC, CICD)
 │   ├── security/               # ReDoS-hardened redaction, HKDF+HMAC-SHA256 fingerprints, SSRF, workspace & prompt safety
 │   ├── shared/                 # AppError hierarchy, correlation IDs, Prometheus metrics, S3/MinIO & local artifact storage
-│   ├── database/               # PostgreSQL 16 + Drizzle ORM (19 tables), SQL migrations, seed script
+│   ├── database/               # PostgreSQL 16 + Drizzle ORM (23 tables), SQL migrations, seed script
 │   ├── scanners/               # ScannerAdapter contract + Semgrep, Trivy (with DB freshness check), Gitleaks adapters
 │   ├── cicd-security/          # GitHub Actions AST YAML analyzer, AWS/Azure/GCP static OIDC trust correlator, CLI & policy engine
 │   ├── findings/               # Normalization, category fingerprinting, KEV/EPSS enrichment, lifecycle, prioritization, JSON/SARIF/CSV
@@ -162,8 +162,8 @@ npm run test:regression
 
 ## Documentation & Community
 
-- **Audit & Strategy:** [Current-State Audit](docs/audits/current-state-assessment.md) | [Competitive Landscape](docs/product/competitive-landscape.md) | [Product Roadmap](docs/product/product-roadmap.md) | [Public Roadmap](ROADMAP.md)
-- **Architecture & Security:** [System Architecture](docs/architecture/system-architecture.md) | [Platform Threat Model](docs/architecture/security-threat-model.md) | [CI/CD Security Architecture](docs/architecture/ci-cd-security-architecture.md) | [CI/CD Threat Model](docs/architecture/ci-cd-security-threat-model.md) | [Canonical Finding Schema](docs/architecture/finding-schema.md)
+- **Audit & Strategy:** [Product Strategy](docs/product/product-strategy.md) | [Product Roadmap](docs/product/product-roadmap.md) | [Public Roadmap](ROADMAP.md) | [Competitive Landscape](docs/product/competitive-landscape.md) | [Current-State Audit](docs/audits/current-state-assessment.md)
+- **Architecture & Security:** [System Architecture](docs/architecture/system-architecture.md) | [Attack-Path, Cloud Identity & NHI Architecture](docs/architecture/attack-path-and-identity-architecture.md) | [CI/CD Security Architecture](docs/architecture/ci-cd-security-architecture.md) | [Platform Threat Model](docs/architecture/security-threat-model.md) | [CI/CD Threat Model](docs/architecture/ci-cd-security-threat-model.md) | [Canonical Finding Schema](docs/architecture/finding-schema.md)
 - **Rules & Engineering:** [GitHub Actions & OIDC Rule Catalog](rules/cicd/github-actions/README.md) | [ADRs](docs/engineering/architecture-decisions.md) | [Production Readiness](docs/engineering/production-readiness.md)
 - **Open-Source Governance:** [SECURITY.md](SECURITY.md) | [CONTRIBUTING.md](CONTRIBUTING.md) | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | [GOVERNANCE.md](GOVERNANCE.md) | [CHANGELOG.md](CHANGELOG.md) | [SUPPORT.md](SUPPORT.md) | [Community Guide](docs/community/README.md)
 
